@@ -3,11 +3,14 @@ name: Build TileLauncher — Windows 11 x64
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:   # Permet le déclenchement manuel depuis l'interface GitHub
+  workflow_dispatch:   # Déclenchement manuel depuis l'interface GitHub
+
+permissions:
+  contents: write      # Nécessaire pour créer des Releases
 
 jobs:
   build:
-    runs-on: windows-latest   # Runner Windows 11 x64 gratuit
+    runs-on: windows-latest   # Runner Windows 11 x64
 
     steps:
 
@@ -70,11 +73,11 @@ jobs:
 
       # ── 6. Vérification de l'exe produit ────────────────────────────────
       - name: Verify build output
+        shell: pwsh
         run: |
           dir dist\
           $size = (Get-Item "dist\TileLauncher.exe").Length / 1MB
           Write-Host "TileLauncher.exe : $([math]::Round($size,1)) Mo"
-        shell: pwsh
 
       # ── 7. Copie du .ini à côté de l'exe ────────────────────────────────
       - name: Copy config file
@@ -82,14 +85,14 @@ jobs:
 
       # ── 8. Création du ZIP final ─────────────────────────────────────────
       - name: Package ZIP
+        shell: pwsh
         run: |
           Compress-Archive -Path dist\TileLauncher.exe, dist\tiles.ini `
             -DestinationPath dist\TileLauncher_Win11_x64.zip -Force
           $size = (Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB
           Write-Host "ZIP : $([math]::Round($size,1)) Mo"
-        shell: pwsh
 
-      # ── 9. Upload comme artifact téléchargeable ──────────────────────────
+      # ── 9. Upload artifact (téléchargeable 30 jours) ─────────────────────
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -97,7 +100,7 @@ jobs:
           path: dist\TileLauncher_Win11_x64.zip
           retention-days: 30
 
-      # ── 10. Création d'une Release GitHub avec le ZIP ───────────────────
+      # ── 10. Création Release GitHub ──────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -106,21 +109,27 @@ jobs:
           body: |
             ## TileLauncher — Standalone Windows 11 x64
 
-            ### Téléchargement
-            Téléchargez **TileLauncher_Win11_x64.zip** ci-dessous.
-
             ### Installation
-            1. Extraire `TileLauncher.exe` et `tiles.ini` dans le même dossier
-            2. Double-cliquer sur `TileLauncher.exe`
-            3. Éditer `tiles.ini` pour configurer vos tuiles
+            1. Télécharger **TileLauncher_Win11_x64.zip**
+            2. Extraire `TileLauncher.exe` et `tiles.ini` dans le même dossier
+            3. Double-cliquer sur `TileLauncher.exe`
+            4. Éditer `tiles.ini` pour configurer vos 8 tuiles
 
-            ### Contenu
-            - `TileLauncher.exe` — exécutable standalone (~40 Mo, aucune dépendance)
-            - `tiles.ini` — configuration des 8 tuiles
-
-            > Build automatique via GitHub Actions sur `windows-latest` (Windows 11 x64)
+            > Build automatique sur `windows-latest` (Windows 11 x64)
           files: dist/TileLauncher_Win11_x64.zip
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 11. Résumé du build ──────────────────────────────────────────────
+      - name: Build summary
+        shell: pwsh
+        run: |
+          $size = (Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB
+          echo "## ✅ Build réussi !" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Fichier | Taille |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| TileLauncher_Win11_x64.zip | $([math]::Round($size,1)) Mo |" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "⬇️ Téléchargement : onglet **Releases** ou **Actions › Artifacts**" >> $env:GITHUB_STEP_SUMMARY
