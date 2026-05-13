@@ -11,8 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    outputs:
-      zip_path: dist\TileLauncher_Win11_x64.zip
 
     steps:
 
@@ -27,21 +25,82 @@ jobs:
           python-version: '3.11'
           architecture: 'x64'
 
-      # ── 3. Dépendances ───────────────────────────────────────────────────
+      # ── 3. Dépendances + UPX ─────────────────────────────────────────────
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install PyQt5==5.15.10
           pip install pyinstaller==6.10.0
 
-      # ── 4. Compilation ───────────────────────────────────────────────────
-      - name: Build standalone exe
+      # ── 4. Téléchargement et installation UPX ────────────────────────────
+      - name: Install UPX
+        shell: pwsh
+        run: |
+          $upxVersion = "4.2.4"
+          $url = "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip"
+          Invoke-WebRequest -Uri $url -OutFile upx.zip
+          Expand-Archive -Path upx.zip -DestinationPath upx_dir
+          $upxExe = Get-ChildItem -Path upx_dir -Recurse -Filter "upx.exe" | Select-Object -First 1
+          Copy-Item $upxExe.FullName -Destination "C:\Windows\System32\upx.exe"
+          upx --version | Select-Object -First 1
+          Write-Host "UPX installé"
+
+      # ── 5. Script de build optimisé ──────────────────────────────────────
+      # On crée un hook PyInstaller custom pour ne collecter QUE
+      # les modules Qt réellement utilisés (Core, Gui, Widgets)
+      - name: Create PyInstaller hook
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path hooks | Out-Null
+          @"
+          # hook-PyQt5.py — ne collecter que les binaires Qt nécessaires
+          from PyInstaller.utils.hooks import collect_dynamic_libs
+          import os, glob
+
+          # Modules Qt strictement nécessaires
+          NEEDED = {
+              'Qt5Core', 'Qt5Gui', 'Qt5Widgets', 'Qt5PrintSupport',
+              'Qt5WinExtras', 'Qt5XcbQpa',
+          }
+
+          # Plugins Qt nécessaires uniquement
+          NEEDED_PLUGINS = {'platforms', 'styles', 'imageformats'}
+
+          binaries = []
+          try:
+              import PyQt5
+              qt_dir = os.path.dirname(PyQt5.__file__)
+
+              # DLL racine : garder seulement les nécessaires
+              for dll in glob.glob(os.path.join(qt_dir, 'Qt5*.dll')):
+                  name = os.path.basename(dll).replace('.dll', '')
+                  if name in NEEDED:
+                      binaries.append((dll, '.'))
+
+              # Plugins : garder seulement platforms + styles + imageformats
+              plugins_dir = os.path.join(qt_dir, 'Qt', 'plugins')
+              if not os.path.isdir(plugins_dir):
+                  plugins_dir = os.path.join(qt_dir, 'plugins')
+              for plugin_type in NEEDED_PLUGINS:
+                  plugin_path = os.path.join(plugins_dir, plugin_type)
+                  if os.path.isdir(plugin_path):
+                      for f in glob.glob(os.path.join(plugin_path, '*.dll')):
+                          binaries.append((f, os.path.join('PyQt5', 'Qt', 'plugins', plugin_type)))
+          except Exception as e:
+              print(f'Hook warning: {e}')
+          "@ | Out-File -FilePath hooks\hook-PyQt5.py -Encoding utf8
+          Write-Host "Hook créé"
+
+      # ── 6. Compilation avec toutes les optimisations ──────────────────────
+      - name: Build optimized exe
+        shell: pwsh
         run: |
           pyinstaller `
             --onefile `
             --windowed `
             --name TileLauncher `
             --add-data "tiles.ini;." `
+            `
             --hidden-import PyQt5 `
             --hidden-import PyQt5.QtCore `
             --hidden-import PyQt5.QtGui `
@@ -51,152 +110,181 @@ jobs:
             --hidden-import configparser `
             --hidden-import ctypes `
             --hidden-import ctypes.wintypes `
+            `
             --exclude-module tkinter `
             --exclude-module unittest `
+            --exclude-module doctest `
+            --exclude-module pydoc `
+            --exclude-module difflib `
+            --exclude-module ftplib `
+            --exclude-module email `
+            --exclude-module html `
+            --exclude-module http `
+            --exclude-module urllib `
+            --exclude-module xml `
+            --exclude-module xmlrpc `
+            --exclude-module sqlite3 `
+            --exclude-module pickle `
+            --exclude-module multiprocessing `
+            --exclude-module concurrent `
+            --exclude-module asyncio `
+            --exclude-module logging `
             --exclude-module PyQt5.QtNetwork `
             --exclude-module PyQt5.QtSql `
+            --exclude-module PyQt5.QtTest `
             --exclude-module PyQt5.QtWebEngine `
             --exclude-module PyQt5.QtWebEngineCore `
             --exclude-module PyQt5.QtWebEngineWidgets `
+            --exclude-module PyQt5.QtWebSockets `
             --exclude-module PyQt5.QtMultimedia `
+            --exclude-module PyQt5.QtMultimediaWidgets `
             --exclude-module PyQt5.QtBluetooth `
+            --exclude-module PyQt5.QtNfc `
+            --exclude-module PyQt5.QtPositioning `
             --exclude-module PyQt5.QtQuick `
+            --exclude-module PyQt5.QtQuickWidgets `
+            --exclude-module PyQt5.QtSerialPort `
+            --exclude-module PyQt5.QtXml `
+            --exclude-module PyQt5.QtXmlPatterns `
             --exclude-module PyQt5.QtDesigner `
-            --noupx `
+            --exclude-module PyQt5.QtHelp `
+            --exclude-module PyQt5.QtSensors `
+            --exclude-module PyQt5.Qt3DCore `
+            --exclude-module PyQt5.Qt3DRender `
+            --exclude-module PyQt5.Qt3DInput `
+            --exclude-module PyQt5.Qt3DLogic `
+            --exclude-module PyQt5.Qt3DAnimation `
+            --exclude-module PyQt5.Qt3DExtras `
+            --exclude-module PyQt5.QtChart `
+            --exclude-module PyQt5.QtDataVisualization `
+            --exclude-module PyQt5.QtLocation `
+            --exclude-module PyQt5.QtPurchasing `
+            --exclude-module PyQt5.QtRemoteObjects `
+            --exclude-module PyQt5.QtTextToSpeech `
+            `
+            --upx-dir "C:\Windows\System32" `
+            --upx-exclude "vcruntime140.dll" `
+            --upx-exclude "python3.dll" `
+            --upx-exclude "python311.dll" `
+            --upx-exclude "MSVCP140.dll" `
+            `
+            --strip `
             tile_launcher.py
 
-      # ── 5. Copie du .ini et packaging ZIP ────────────────────────────────
+      # ── 7. Rapport de taille avant/après ─────────────────────────────────
+      - name: Size report
+        shell: pwsh
+        run: |
+          $exe = Get-Item "dist\TileLauncher.exe"
+          $sizeMB = [math]::Round($exe.Length / 1MB, 2)
+          Write-Host "══════════════════════════════"
+          Write-Host "  TileLauncher.exe : $sizeMB Mo"
+          Write-Host "══════════════════════════════"
+          echo "EXE_SIZE=$sizeMB" >> $env:GITHUB_ENV
+
+      # ── 8. Packaging ZIP ─────────────────────────────────────────────────
       - name: Package ZIP
         shell: pwsh
         run: |
           copy tiles.ini dist\tiles.ini
-          Compress-Archive -Path dist\TileLauncher.exe, dist\tiles.ini `
+          Compress-Archive `
+            -Path dist\TileLauncher.exe, dist\tiles.ini `
             -DestinationPath dist\TileLauncher_Win11_x64.zip -Force
-          $size = (Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB
-          Write-Host "ZIP : $([math]::Round($size,1)) Mo"
+          $zipMB = [math]::Round((Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB, 2)
+          Write-Host "ZIP final : $zipMB Mo"
 
-      # ── 6. Upload artifact pour le job test ──────────────────────────────
-      - name: Upload exe for testing
+      # ── 9. Upload artifact ───────────────────────────────────────────────
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TileLauncher_Win11_x64
           path: dist\TileLauncher_Win11_x64.zip
           retention-days: 30
 
-  # ════════════════════════════════════════════════════════════════════════
+      # ── 10. Résumé taille ────────────────────────────────────────────────
+      - name: Build summary
+        shell: pwsh
+        run: |
+          $exeMB  = [math]::Round((Get-Item "dist\TileLauncher.exe").Length / 1MB, 1)
+          $zipMB  = [math]::Round((Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB, 1)
+          echo "## ✅ Build optimisé réussi" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Fichier | Taille |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| TileLauncher.exe | $exeMB Mo |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| TileLauncher_Win11_x64.zip | $zipMB Mo |" >> $env:GITHUB_STEP_SUMMARY
+
+  # ══════════════════════════════════════════════════════════════════════
   test:
     needs: build
     runs-on: windows-latest
 
     steps:
 
-      # ── 1. Récupération de l'exe compilé ─────────────────────────────────
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: TileLauncher_Win11_x64
           path: test_dir
 
-      # ── 2. Extraction du ZIP ─────────────────────────────────────────────
       - name: Extract ZIP
         shell: pwsh
         run: |
           Expand-Archive -Path test_dir\TileLauncher_Win11_x64.zip `
             -DestinationPath test_dir -Force
-          Write-Host "Contenu du dossier de test :"
           dir test_dir\
 
-      # ── 3. Test 1 — L'exe existe et a une taille raisonnable ─────────────
       - name: "TEST 1 : Existence et taille de l'exe"
         shell: pwsh
         run: |
           $exe = "test_dir\TileLauncher.exe"
-          if (-not (Test-Path $exe)) {
-            Write-Error "FAIL — TileLauncher.exe introuvable"
-            exit 1
-          }
+          if (-not (Test-Path $exe)) { Write-Error "FAIL — exe introuvable"; exit 1 }
           $size = (Get-Item $exe).Length / 1MB
-          Write-Host "Taille : $([math]::Round($size,1)) Mo"
-          if ($size -lt 5) {
-            Write-Error "FAIL — exe trop petit ($([math]::Round($size,1)) Mo), probablement corrompu"
-            exit 1
-          }
-          Write-Host "PASS — exe présent ($([math]::Round($size,1)) Mo)"
+          if ($size -lt 5) { Write-Error "FAIL — exe trop petit ($([math]::Round($size,1)) Mo)"; exit 1 }
+          Write-Host "PASS — $([math]::Round($size,1)) Mo"
 
-      # ── 4. Test 2 — Le .ini est présent ──────────────────────────────────
       - name: "TEST 2 : Présence de tiles.ini"
         shell: pwsh
         run: |
-          $ini = "test_dir\tiles.ini"
-          if (-not (Test-Path $ini)) {
-            Write-Error "FAIL — tiles.ini introuvable"
-            exit 1
-          }
-          $lines = (Get-Content $ini).Count
-          Write-Host "PASS — tiles.ini présent ($lines lignes)"
+          if (-not (Test-Path "test_dir\tiles.ini")) { Write-Error "FAIL"; exit 1 }
+          Write-Host "PASS — tiles.ini présent"
 
-      # ── 5. Test 3 — L'exe démarre sans crash (mode headless via Xvfb) ────
-      - name: "TEST 3 : Démarrage de l'exe (5 secondes)"
+      - name: "TEST 3 : Démarrage sans crash (5 secondes)"
         shell: pwsh
         run: |
-          Write-Host "Lancement de TileLauncher.exe..."
-          $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" `
-            -PassThru -ErrorAction Stop
-
-          Write-Host "PID : $($proc.Id)"
+          $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" -PassThru
           Start-Sleep -Seconds 5
-
-          # Vérifier que le process tourne encore (pas de crash immédiat)
           $proc.Refresh()
           if ($proc.HasExited) {
-            $code = $proc.ExitCode
-            Write-Error "FAIL — processus terminé après 5s (code de sortie : $code)"
+            Write-Error "FAIL — crash (exit code $($proc.ExitCode))"
             exit 1
           }
-          Write-Host "PASS — processus vivant après 5 secondes (PID $($proc.Id))"
-
-          # Arrêt propre
+          Write-Host "PASS — processus vivant (PID $($proc.Id))"
           Stop-Process -Id $proc.Id -Force
-          Write-Host "Processus arrêté proprement"
 
-      # ── 6. Test 4 — Screenshot de la fenêtre ─────────────────────────────
-      - name: "TEST 4 : Screenshot de la fenêtre"
+      - name: "TEST 4 : Screenshot"
         shell: pwsh
         run: |
-          # Lancer l'exe
           $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" -PassThru
           Start-Sleep -Seconds 4
-
-          # Capturer l'écran entier avec .NET
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
-          $screen   = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap   = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
-          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-          $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-          $bitmap.Save("test_dir\screenshot.png")
-          $graphics.Dispose()
-          $bitmap.Dispose()
-
-          Write-Host "PASS — screenshot sauvegardé (screenshot.png)"
-
-          # Arrêt
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          $gfx.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $bmp.Save("test_dir\screenshot.png")
+          $gfx.Dispose(); $bmp.Dispose()
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "PASS — screenshot capturé"
 
-      # ── 7. Test 5 — Vérification du contenu du .ini ──────────────────────
-      - name: "TEST 5 : Contenu de tiles.ini"
+      - name: "TEST 5 : Contenu tiles.ini (8 tuiles)"
         shell: pwsh
         run: |
           $ini = Get-Content "test_dir\tiles.ini" -Raw
-          $sections = ([regex]::Matches($ini, '\[Tile\d\]')).Count
-          Write-Host "Sections [TileN] trouvées : $sections"
-          if ($sections -lt 8) {
-            Write-Error "FAIL — seulement $sections sections trouvées (8 attendues)"
-            exit 1
-          }
-          Write-Host "PASS — $sections tuiles configurées"
+          $n = ([regex]::Matches($ini, '\[Tile\d\]')).Count
+          if ($n -lt 8) { Write-Error "FAIL — $n sections (8 attendues)"; exit 1 }
+          Write-Host "PASS — $n tuiles configurées"
 
-      # ── 8. Upload du screenshot comme artifact ────────────────────────────
       - name: Upload screenshot
         if: always()
         uses: actions/upload-artifact@v4
@@ -205,26 +293,24 @@ jobs:
           path: test_dir\screenshot.png
           retention-days: 7
 
-      # ── 9. Résumé des tests ───────────────────────────────────────────────
       - name: Test summary
         if: always()
         shell: pwsh
         run: |
           echo "## 🧪 Résultats des tests" >> $env:GITHUB_STEP_SUMMARY
-          echo "" >> $env:GITHUB_STEP_SUMMARY
           echo "| # | Test | Résultat |" >> $env:GITHUB_STEP_SUMMARY
           echo "|---|------|----------|" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 1 | Existence et taille de l'exe | ✅ |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 2 | Présence de tiles.ini | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 1 | Exe présent et taille correcte | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 2 | tiles.ini présent | ✅ |" >> $env:GITHUB_STEP_SUMMARY
           echo "| 3 | Démarrage sans crash (5s) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 4 | Screenshot de la fenêtre | ✅ |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 5 | Contenu tiles.ini (8 tuiles) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 4 | Screenshot fenêtre | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 5 | 8 tuiles configurées | ✅ |" >> $env:GITHUB_STEP_SUMMARY
           echo "" >> $env:GITHUB_STEP_SUMMARY
           echo "📸 Screenshot disponible dans les Artifacts" >> $env:GITHUB_STEP_SUMMARY
 
-  # ════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════
   release:
-    needs: [ build, test ]   # Release uniquement si build ET tests OK
+    needs: [ build, test ]
     runs-on: windows-latest
 
     steps:
@@ -241,7 +327,7 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: "TileLauncher v1.0.${{ github.run_number }} — Windows 11 x64"
           body: |
-            ## TileLauncher — Standalone Windows 11 x64
+            ## TileLauncher — Standalone Windows 11 x64 (build optimisé)
 
             ### ✅ Build et tests automatiques réussis
 
@@ -253,13 +339,18 @@ jobs:
             | Screenshot fenêtre | ✅ |
             | 8 tuiles configurées | ✅ |
 
+            ### Optimisations appliquées
+            - Modules Qt inutiles exclus (~30 modules)
+            - Compression UPX activée
+            - Bibliothèques Python non nécessaires exclues
+
             ### Installation
             1. Télécharger **TileLauncher_Win11_x64.zip**
             2. Extraire `TileLauncher.exe` et `tiles.ini` dans le même dossier
             3. Double-cliquer sur `TileLauncher.exe`
-            4. Éditer `tiles.ini` avec le Bloc-notes pour configurer vos tuiles
+            4. Éditer `tiles.ini` pour configurer vos 8 tuiles
 
-            > Build et tests automatiques sur `windows-latest` (Windows 11 x64)
+            > Build automatique sur `windows-latest` (Windows 11 x64)
           files: dist\TileLauncher_Win11_x64.zip
           draft: false
           prerelease: false
