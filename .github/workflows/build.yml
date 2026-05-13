@@ -1,0 +1,126 @@
+name: Build TileLauncher — Windows 11 x64
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # Permet le déclenchement manuel depuis l'interface GitHub
+
+jobs:
+  build:
+    runs-on: windows-latest   # Runner Windows 11 x64 gratuit
+
+    steps:
+
+      # ── 1. Récupération du code ──────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Installation Python 3.11 64 bits ─────────────────────────────
+      - name: Setup Python 3.11 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+
+      # ── 3. Installation des dépendances ─────────────────────────────────
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt5==5.15.10
+          pip install pyinstaller==6.10.0
+
+      # ── 4. Vérification de l'environnement ──────────────────────────────
+      - name: Check environment
+        run: |
+          python --version
+          python -c "import struct; print('Architecture:', struct.calcsize('P')*8, 'bits')"
+          pip show PyQt5 | findstr Version
+          pyinstaller --version
+
+      # ── 5. Compilation PyInstaller --onefile ────────────────────────────
+      - name: Build standalone exe
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name TileLauncher `
+            --add-data "tiles.ini;." `
+            --hidden-import PyQt5 `
+            --hidden-import PyQt5.QtCore `
+            --hidden-import PyQt5.QtGui `
+            --hidden-import PyQt5.QtWidgets `
+            --hidden-import PyQt5.QtPrintSupport `
+            --hidden-import PyQt5.sip `
+            --hidden-import configparser `
+            --hidden-import ctypes `
+            --hidden-import ctypes.wintypes `
+            --exclude-module tkinter `
+            --exclude-module unittest `
+            --exclude-module PyQt5.QtNetwork `
+            --exclude-module PyQt5.QtSql `
+            --exclude-module PyQt5.QtWebEngine `
+            --exclude-module PyQt5.QtWebEngineCore `
+            --exclude-module PyQt5.QtWebEngineWidgets `
+            --exclude-module PyQt5.QtMultimedia `
+            --exclude-module PyQt5.QtBluetooth `
+            --exclude-module PyQt5.QtQuick `
+            --exclude-module PyQt5.QtDesigner `
+            --noupx `
+            tile_launcher.py
+
+      # ── 6. Vérification de l'exe produit ────────────────────────────────
+      - name: Verify build output
+        run: |
+          dir dist\
+          $size = (Get-Item "dist\TileLauncher.exe").Length / 1MB
+          Write-Host "TileLauncher.exe : $([math]::Round($size,1)) Mo"
+        shell: pwsh
+
+      # ── 7. Copie du .ini à côté de l'exe ────────────────────────────────
+      - name: Copy config file
+        run: copy tiles.ini dist\tiles.ini
+
+      # ── 8. Création du ZIP final ─────────────────────────────────────────
+      - name: Package ZIP
+        run: |
+          Compress-Archive -Path dist\TileLauncher.exe, dist\tiles.ini `
+            -DestinationPath dist\TileLauncher_Win11_x64.zip -Force
+          $size = (Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB
+          Write-Host "ZIP : $([math]::Round($size,1)) Mo"
+        shell: pwsh
+
+      # ── 9. Upload comme artifact téléchargeable ──────────────────────────
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TileLauncher_Win11_x64
+          path: dist\TileLauncher_Win11_x64.zip
+          retention-days: 30
+
+      # ── 10. Création d'une Release GitHub avec le ZIP ───────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "TileLauncher v1.0.${{ github.run_number }} — Windows 11 x64"
+          body: |
+            ## TileLauncher — Standalone Windows 11 x64
+
+            ### Téléchargement
+            Téléchargez **TileLauncher_Win11_x64.zip** ci-dessous.
+
+            ### Installation
+            1. Extraire `TileLauncher.exe` et `tiles.ini` dans le même dossier
+            2. Double-cliquer sur `TileLauncher.exe`
+            3. Éditer `tiles.ini` pour configurer vos tuiles
+
+            ### Contenu
+            - `TileLauncher.exe` — exécutable standalone (~40 Mo, aucune dépendance)
+            - `tiles.ini` — configuration des 8 tuiles
+
+            > Build automatique via GitHub Actions sur `windows-latest` (Windows 11 x64)
+          files: dist/TileLauncher_Win11_x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
