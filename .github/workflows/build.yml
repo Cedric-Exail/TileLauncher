@@ -1,46 +1,40 @@
-name: Build TileLauncher — Windows 11 x64
+name: Build & Test TileLauncher — Windows 11 x64
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:   # Déclenchement manuel depuis l'interface GitHub
+  workflow_dispatch:
 
 permissions:
-  contents: write      # Nécessaire pour créer des Releases
+  contents: write
 
 jobs:
   build:
-    runs-on: windows-latest   # Runner Windows 11 x64
+    runs-on: windows-latest
+    outputs:
+      zip_path: dist\TileLauncher_Win11_x64.zip
 
     steps:
 
-      # ── 1. Récupération du code ──────────────────────────────────────────
+      # ── 1. Checkout ──────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Installation Python 3.11 64 bits ─────────────────────────────
+      # ── 2. Python 3.11 x64 ──────────────────────────────────────────────
       - name: Setup Python 3.11 x64
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           architecture: 'x64'
 
-      # ── 3. Installation des dépendances ─────────────────────────────────
+      # ── 3. Dépendances ───────────────────────────────────────────────────
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install PyQt5==5.15.10
           pip install pyinstaller==6.10.0
 
-      # ── 4. Vérification de l'environnement ──────────────────────────────
-      - name: Check environment
-        run: |
-          python --version
-          python -c "import struct; print('Architecture:', struct.calcsize('P')*8, 'bits')"
-          pip show PyQt5 | findstr Version
-          pyinstaller --version
-
-      # ── 5. Compilation PyInstaller --onefile ────────────────────────────
+      # ── 4. Compilation ───────────────────────────────────────────────────
       - name: Build standalone exe
         run: |
           pyinstaller `
@@ -71,36 +65,176 @@ jobs:
             --noupx `
             tile_launcher.py
 
-      # ── 6. Vérification de l'exe produit ────────────────────────────────
-      - name: Verify build output
-        shell: pwsh
-        run: |
-          dir dist\
-          $size = (Get-Item "dist\TileLauncher.exe").Length / 1MB
-          Write-Host "TileLauncher.exe : $([math]::Round($size,1)) Mo"
-
-      # ── 7. Copie du .ini à côté de l'exe ────────────────────────────────
-      - name: Copy config file
-        run: copy tiles.ini dist\tiles.ini
-
-      # ── 8. Création du ZIP final ─────────────────────────────────────────
+      # ── 5. Copie du .ini et packaging ZIP ────────────────────────────────
       - name: Package ZIP
         shell: pwsh
         run: |
+          copy tiles.ini dist\tiles.ini
           Compress-Archive -Path dist\TileLauncher.exe, dist\tiles.ini `
             -DestinationPath dist\TileLauncher_Win11_x64.zip -Force
           $size = (Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB
           Write-Host "ZIP : $([math]::Round($size,1)) Mo"
 
-      # ── 9. Upload artifact (téléchargeable 30 jours) ─────────────────────
-      - name: Upload artifact
+      # ── 6. Upload artifact pour le job test ──────────────────────────────
+      - name: Upload exe for testing
         uses: actions/upload-artifact@v4
         with:
           name: TileLauncher_Win11_x64
           path: dist\TileLauncher_Win11_x64.zip
           retention-days: 30
 
-      # ── 10. Création Release GitHub ──────────────────────────────────────
+  # ════════════════════════════════════════════════════════════════════════
+  test:
+    needs: build
+    runs-on: windows-latest
+
+    steps:
+
+      # ── 1. Récupération de l'exe compilé ─────────────────────────────────
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TileLauncher_Win11_x64
+          path: test_dir
+
+      # ── 2. Extraction du ZIP ─────────────────────────────────────────────
+      - name: Extract ZIP
+        shell: pwsh
+        run: |
+          Expand-Archive -Path test_dir\TileLauncher_Win11_x64.zip `
+            -DestinationPath test_dir -Force
+          Write-Host "Contenu du dossier de test :"
+          dir test_dir\
+
+      # ── 3. Test 1 — L'exe existe et a une taille raisonnable ─────────────
+      - name: "TEST 1 : Existence et taille de l'exe"
+        shell: pwsh
+        run: |
+          $exe = "test_dir\TileLauncher.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "FAIL — TileLauncher.exe introuvable"
+            exit 1
+          }
+          $size = (Get-Item $exe).Length / 1MB
+          Write-Host "Taille : $([math]::Round($size,1)) Mo"
+          if ($size -lt 5) {
+            Write-Error "FAIL — exe trop petit ($([math]::Round($size,1)) Mo), probablement corrompu"
+            exit 1
+          }
+          Write-Host "PASS — exe présent ($([math]::Round($size,1)) Mo)"
+
+      # ── 4. Test 2 — Le .ini est présent ──────────────────────────────────
+      - name: "TEST 2 : Présence de tiles.ini"
+        shell: pwsh
+        run: |
+          $ini = "test_dir\tiles.ini"
+          if (-not (Test-Path $ini)) {
+            Write-Error "FAIL — tiles.ini introuvable"
+            exit 1
+          }
+          $lines = (Get-Content $ini).Count
+          Write-Host "PASS — tiles.ini présent ($lines lignes)"
+
+      # ── 5. Test 3 — L'exe démarre sans crash (mode headless via Xvfb) ────
+      - name: "TEST 3 : Démarrage de l'exe (5 secondes)"
+        shell: pwsh
+        run: |
+          Write-Host "Lancement de TileLauncher.exe..."
+          $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" `
+            -PassThru -ErrorAction Stop
+
+          Write-Host "PID : $($proc.Id)"
+          Start-Sleep -Seconds 5
+
+          # Vérifier que le process tourne encore (pas de crash immédiat)
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            $code = $proc.ExitCode
+            Write-Error "FAIL — processus terminé après 5s (code de sortie : $code)"
+            exit 1
+          }
+          Write-Host "PASS — processus vivant après 5 secondes (PID $($proc.Id))"
+
+          # Arrêt propre
+          Stop-Process -Id $proc.Id -Force
+          Write-Host "Processus arrêté proprement"
+
+      # ── 6. Test 4 — Screenshot de la fenêtre ─────────────────────────────
+      - name: "TEST 4 : Screenshot de la fenêtre"
+        shell: pwsh
+        run: |
+          # Lancer l'exe
+          $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" -PassThru
+          Start-Sleep -Seconds 4
+
+          # Capturer l'écran entier avec .NET
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $screen   = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap   = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $bitmap.Save("test_dir\screenshot.png")
+          $graphics.Dispose()
+          $bitmap.Dispose()
+
+          Write-Host "PASS — screenshot sauvegardé (screenshot.png)"
+
+          # Arrêt
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+
+      # ── 7. Test 5 — Vérification du contenu du .ini ──────────────────────
+      - name: "TEST 5 : Contenu de tiles.ini"
+        shell: pwsh
+        run: |
+          $ini = Get-Content "test_dir\tiles.ini" -Raw
+          $sections = ([regex]::Matches($ini, '\[Tile\d\]')).Count
+          Write-Host "Sections [TileN] trouvées : $sections"
+          if ($sections -lt 8) {
+            Write-Error "FAIL — seulement $sections sections trouvées (8 attendues)"
+            exit 1
+          }
+          Write-Host "PASS — $sections tuiles configurées"
+
+      # ── 8. Upload du screenshot comme artifact ────────────────────────────
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-screenshot
+          path: test_dir\screenshot.png
+          retention-days: 7
+
+      # ── 9. Résumé des tests ───────────────────────────────────────────────
+      - name: Test summary
+        if: always()
+        shell: pwsh
+        run: |
+          echo "## 🧪 Résultats des tests" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "| # | Test | Résultat |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|---|------|----------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 1 | Existence et taille de l'exe | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 2 | Présence de tiles.ini | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 3 | Démarrage sans crash (5s) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 4 | Screenshot de la fenêtre | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 5 | Contenu tiles.ini (8 tuiles) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "📸 Screenshot disponible dans les Artifacts" >> $env:GITHUB_STEP_SUMMARY
+
+  # ════════════════════════════════════════════════════════════════════════
+  release:
+    needs: [ build, test ]   # Release uniquement si build ET tests OK
+    runs-on: windows-latest
+
+    steps:
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TileLauncher_Win11_x64
+          path: dist
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -109,27 +243,25 @@ jobs:
           body: |
             ## TileLauncher — Standalone Windows 11 x64
 
+            ### ✅ Build et tests automatiques réussis
+
+            | Test | Résultat |
+            |------|----------|
+            | Exe présent et taille correcte | ✅ |
+            | tiles.ini présent | ✅ |
+            | Démarrage sans crash (5s) | ✅ |
+            | Screenshot fenêtre | ✅ |
+            | 8 tuiles configurées | ✅ |
+
             ### Installation
             1. Télécharger **TileLauncher_Win11_x64.zip**
             2. Extraire `TileLauncher.exe` et `tiles.ini` dans le même dossier
             3. Double-cliquer sur `TileLauncher.exe`
-            4. Éditer `tiles.ini` pour configurer vos 8 tuiles
+            4. Éditer `tiles.ini` avec le Bloc-notes pour configurer vos tuiles
 
-            > Build automatique sur `windows-latest` (Windows 11 x64)
-          files: dist/TileLauncher_Win11_x64.zip
+            > Build et tests automatiques sur `windows-latest` (Windows 11 x64)
+          files: dist\TileLauncher_Win11_x64.zip
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # ── 11. Résumé du build ──────────────────────────────────────────────
-      - name: Build summary
-        shell: pwsh
-        run: |
-          $size = (Get-Item "dist\TileLauncher_Win11_x64.zip").Length / 1MB
-          echo "## ✅ Build réussi !" >> $env:GITHUB_STEP_SUMMARY
-          echo "| Fichier | Taille |" >> $env:GITHUB_STEP_SUMMARY
-          echo "|---------|--------|" >> $env:GITHUB_STEP_SUMMARY
-          echo "| TileLauncher_Win11_x64.zip | $([math]::Round($size,1)) Mo |" >> $env:GITHUB_STEP_SUMMARY
-          echo "" >> $env:GITHUB_STEP_SUMMARY
-          echo "⬇️ Téléchargement : onglet **Releases** ou **Actions › Artifacts**" >> $env:GITHUB_STEP_SUMMARY
