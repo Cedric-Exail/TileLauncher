@@ -221,11 +221,11 @@ jobs:
           $line3 = '  public delegate bool EnumWndProc(IntPtr h, IntPtr l);'
           $line4 = '  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWndProc c, IntPtr l);'
           $line5 = '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'
-          $line6 = '  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int m);'
-          $line7 = '  public static bool HasWindowWithTitle(string title) {'
+          $line6 = '  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);'
+          $line7 = '  public static bool HasWindowForPid(int pid) {'
           $line8 = '    bool f=false;'
-          $line9 = '    EnumWindows((h,l)=>{ var s=new StringBuilder(256); GetWindowText(h,s,256);'
-          $lineA = '      if(s.ToString().Contains(title)){f=true;return false;} return true;},IntPtr.Zero);'
+          $line9 = '    EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p);'
+          $lineA = '      if((int)p==pid && GetWindowTextLength(h)>0){f=true;return false;} return true;},IntPtr.Zero);'
           $lineB = '    return f;}}'
           $all = $line1,$line2,$line3,$line4,$line5,$line6,$line7,$line8,$line9,$lineA,$lineB
           Set-Content -Path "win32helper.cs" -Value $all -Encoding UTF8
@@ -264,7 +264,7 @@ jobs:
               Write-Error "FAIL - exe crashe (exit code $($proc.ExitCode))"
               exit 1
             }
-            if ([Win32Helper]::HasWindowWithTitle("TileLauncher")) {
+            if ([Win32Helper]::HasWindowForPid($proc.Id)) {
               $launched = $true
               break
             }
@@ -276,7 +276,7 @@ jobs:
           $s  = [math]::Round($chrono.Elapsed.TotalSeconds, 2)
 
           if (-not $launched) {
-            Write-Error "FAIL - fenetre TileLauncher non apparue apres ${timeout}s"
+            Write-Error "FAIL - aucune fenetre pour PID $($proc.Id) apres ${timeout}s"
             exit 1
           }
 
