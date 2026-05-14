@@ -385,7 +385,7 @@ jobs:
         shell: pwsh
         run: |
           # Copier le tiles.ini depuis l'artifact
-          copy profile_dir	iles.ini tiles.ini
+          Copy-Item "profile_dir/tiles.ini" "tiles.ini"
 
           # Injecter QT_QPA_PLATFORM pour tourner headless
           $env:QT_QPA_PLATFORM = "offscreen"
