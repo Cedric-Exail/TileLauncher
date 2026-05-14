@@ -358,8 +358,63 @@ class TileLauncher(QWidget):
 
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import time
+    _t = {}
+
+    _t["start"] = time.perf_counter()
     app = QApplication(sys.argv)
+    _t["QApplication"] = time.perf_counter()
+
     app.setStyle("Fusion")
+    _t["setStyle"] = time.perf_counter()
+
+    # Profiling injecté dans __init__
+    _orig_init = TileLauncher.__init__
+    def _profiled_init(self):
+        self._drag_pos = None
+        t0 = time.perf_counter()
+        self._font_fam = _init_font()
+        _t["_init_font"] = time.perf_counter()
+        self._app_cfg, self._tiles = load_config()
+        _t["load_config"] = time.perf_counter()
+        self._setup_window()
+        _t["_setup_window"] = time.perf_counter()
+        self._build_ui()
+        _t["_build_ui"] = time.perf_counter()
+        self._position_window()
+        _t["_position_window"] = time.perf_counter()
+    TileLauncher.__init__ = _profiled_init
+
     window = TileLauncher()
+    _t["TileLauncher()"] = time.perf_counter()
+
     window.show()
+    _t["show"] = time.perf_counter()
+
+    # Afficher le rapport après 500ms (fenêtre visible)
+    def _print_profile():
+        keys = ["start","QApplication","setStyle","_init_font","load_config",
+                "_setup_window","_build_ui","_position_window","TileLauncher()","show"]
+        prev_key = "start"
+        print("\n=== PROFILING DÉMARRAGE ===")
+        total = 0
+        for k in keys[1:]:
+            if k in _t and prev_key in _t:
+                ms = (_t[k] - _t[prev_key]) * 1000
+                total += ms
+                print(f"  {k:25s} : {ms:7.1f} ms")
+            prev_key = k
+        print(f"  {'TOTAL':25s} : {total:7.1f} ms")
+        print("===========================\n")
+
+    from PyQt5.QtCore import QTimer
+
+    def _print_and_quit():
+        _print_profile()
+        # Quitter après le rapport si on est en mode profiling (QT_QPA_PLATFORM=offscreen)
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            app.quit()
+
+    QTimer.singleShot(300, _print_and_quit)
+
     sys.exit(app.exec_())
