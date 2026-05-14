@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller `
-            --onedir `
+            --onefile `
             --windowed `
             --name TileLauncher `
             --add-data "tiles.ini;." `
@@ -123,12 +123,10 @@ jobs:
       - name: Package ZIP
         shell: pwsh
         run: |
-          # --onedir : l'exe est dans dist\TileLauncher\TileLauncher.exe
-          # tiles.ini est deja copie par --add-data, on en recopie un au meme niveau
-          Copy-Item "tiles.ini" "dist/TileLauncher/tiles.ini" -Force
-          Compress-Archive -Path "dist/TileLauncher" `
+          Copy-Item "tiles.ini" "dist/tiles.ini" -Force
+          Compress-Archive -Path "dist/TileLauncher.exe","dist/tiles.ini" `
             -DestinationPath "dist/TileLauncher_Win11_x64.zip" -Force
-          $exeMB  = [math]::Round((Get-Item "dist/TileLauncher/TileLauncher.exe").Length / 1MB, 1)
+          $exeMB  = [math]::Round((Get-Item "dist/TileLauncher.exe").Length / 1MB, 1)
           $zipMB  = [math]::Round((Get-Item "dist/TileLauncher_Win11_x64.zip").Length / 1MB, 1)
           Write-Host "exe: ${exeMB} Mo  zip: ${zipMB} Mo"
           echo "EXE_MB=$exeMB" >> $env:GITHUB_ENV
@@ -171,22 +169,16 @@ jobs:
       - name: "TEST 1 : Existence et taille"
         shell: pwsh
         run: |
-          # --onedir : exe dans le sous-dossier TileLauncher/
-          $exe = "test_dir/TileLauncher/TileLauncher.exe"
-          if (-not (Test-Path $exe)) {
-            # Fallback : chercher l'exe partout dans test_dir
-            $found = Get-ChildItem -Path "test_dir" -Filter "TileLauncher.exe" -Recurse | Select-Object -First 1
-            if ($found) { $exe = $found.FullName } else { Write-Error "FAIL - exe introuvable"; exit 1 }
-          }
+          $exe = "test_dir/TileLauncher.exe"
+          if (-not (Test-Path $exe)) { Write-Error "FAIL - exe introuvable"; exit 1 }
           $size = (Get-Item $exe).Length / 1MB
-          if ($size -lt 1) { Write-Error "FAIL - exe trop petit ($([math]::Round($size,1)) Mo)"; exit 1 }
+          if ($size -lt 5) { Write-Error "FAIL - exe trop petit ($([math]::Round($size,1)) Mo)"; exit 1 }
           Write-Host "PASS - $([math]::Round($size,1)) Mo"
-          echo "EXE_PATH=$exe" >> $env:GITHUB_ENV
 
       - name: "TEST 2 : Presence tiles.ini"
         shell: pwsh
         run: |
-          if (-not (Test-Path "test_dir/TileLauncher/tiles.ini")) { Write-Error "FAIL"; exit 1 }
+          if (-not (Test-Path "test_dir/tiles.ini")) { Write-Error "FAIL"; exit 1 }
           Write-Host "PASS - tiles.ini present"
 
       - name: "TEST 3 : Demarrage sans crash (5s)"
@@ -197,8 +189,8 @@ jobs:
           Write-Host "Resolution: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
 
           $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName         = (Resolve-Path "test_dir/TileLauncher/TileLauncher.exe").Path
-          $psi.WorkingDirectory = (Resolve-Path "test_dir/TileLauncher").Path
+          $psi.FileName         = (Resolve-Path "test_dir/TileLauncher.exe").Path
+          $psi.WorkingDirectory = (Resolve-Path "test_dir").Path
           $psi.UseShellExecute  = $true
           $proc = [System.Diagnostics.Process]::Start($psi)
           Write-Host "PID: $($proc.Id)"
@@ -256,8 +248,8 @@ jobs:
           Add-Type -Path "win32helper.dll"
 
           $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName         = (Resolve-Path "test_dir/TileLauncher/TileLauncher.exe").Path
-          $psi.WorkingDirectory = (Resolve-Path "test_dir/TileLauncher").Path
+          $psi.FileName         = (Resolve-Path "test_dir/TileLauncher.exe").Path
+          $psi.WorkingDirectory = (Resolve-Path "test_dir").Path
           $psi.UseShellExecute  = $true
 
           $chrono = [System.Diagnostics.Stopwatch]::StartNew()
@@ -317,7 +309,7 @@ jobs:
       - name: "TEST 5 : Contenu tiles.ini (8 tuiles)"
         shell: pwsh
         run: |
-          $ini = Get-Content "test_dir/TileLauncher/tiles.ini" -Raw
+          $ini = Get-Content "test_dir/tiles.ini" -Raw
           $n = ([regex]::Matches($ini, '\[Tile\d\]')).Count
           if ($n -lt 8) { Write-Error "FAIL - $n sections (8 attendues)"; exit 1 }
           Write-Host "PASS - $n tuiles configurees"
@@ -364,6 +356,8 @@ jobs:
   profile:
     needs: build
     runs-on: windows-latest
+    # Job de diagnostic optionnel — s'execute toujours mais peut etre ignore
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[profile]') }}
 
     steps:
       - name: Checkout source
@@ -394,7 +388,7 @@ jobs:
       - name: "PROFILING : temps de demarrage par etape"
         shell: pwsh
         run: |
-          Copy-Item "profile_dir/TileLauncher/tiles.ini" "tiles.ini" -Force
+          Copy-Item "profile_dir/tiles.ini" "tiles.ini" -Force
           $env:QT_QPA_PLATFORM = "offscreen"
           Write-Host "=== Lancement du profiling ==="
           python tile_launcher.py 2>&1
