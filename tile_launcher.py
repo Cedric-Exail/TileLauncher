@@ -358,57 +358,8 @@ class TileLauncher(QWidget):
 
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import time
-    _t = {}
-
-    _t["start"] = time.perf_counter()
     app = QApplication(sys.argv)
-    _t["QApplication"] = time.perf_counter()
-
     app.setStyle("Fusion")
-    _t["setStyle"] = time.perf_counter()
-
-    # Monkey-patch __init__ pour mesurer chaque etape
-    def _profiled_init(self):
-        QWidget.__init__(self)
-        self._drag_pos = None
-        self._font_fam = _init_font()
-        _t["_init_font"] = time.perf_counter()
-        self._app_cfg, self._tiles = load_config()
-        _t["load_config"] = time.perf_counter()
-        self._setup_window()
-        _t["_setup_window"] = time.perf_counter()
-        self._build_ui()
-        _t["_build_ui"] = time.perf_counter()
-        self._position_window()
-        _t["_position_window"] = time.perf_counter()
-
-    TileLauncher.__init__ = _profiled_init
-
     window = TileLauncher()
-    _t["TileLauncher()"] = time.perf_counter()
-
     window.show()
-    _t["show"] = time.perf_counter()
-
-    def _print_and_quit():
-        keys = ["start", "QApplication", "setStyle", "_init_font", "load_config",
-                "_setup_window", "_build_ui", "_position_window", "TileLauncher()", "show"]
-        print("\n=== PROFILING DEMARRAGE ===")
-        prev = "start"
-        total = 0
-        for k in keys[1:]:
-            if k in _t and prev in _t:
-                ms = (_t[k] - _t[prev]) * 1000
-                total += ms
-                print(f"  {k:25s} : {ms:7.1f} ms")
-            prev = k
-        print(f"  {'TOTAL':25s} : {total:7.1f} ms")
-        print("===========================\n")
-        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
-            app.quit()
-
-    from PyQt5.QtCore import QTimer
-    QTimer.singleShot(300, _print_and_quit)
-
     sys.exit(app.exec_())
