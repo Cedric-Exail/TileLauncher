@@ -394,7 +394,7 @@ jobs:
       - name: "PROFILING : temps de demarrage par etape"
         shell: pwsh
         run: |
-          Copy-Item "profile_dir/tiles.ini" "tiles.ini" -Force
+          Copy-Item "profile_dir/TileLauncher/tiles.ini" "tiles.ini" -Force
           $env:QT_QPA_PLATFORM = "offscreen"
           Write-Host "=== Lancement du profiling ==="
           python tile_launcher.py 2>&1
