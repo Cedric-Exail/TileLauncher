@@ -284,38 +284,96 @@ jobs:
           Write-Host "PASS — processus vivant après 5 secondes (PID $($proc.Id))"
           Stop-Process -Id $proc.Id -Force
 
-      - name: "TEST 4 : Screenshot"
+      - name: "TEST 4 : Temps de lancement + Screenshot"
         shell: pwsh
         run: |
-          # Démarrer l'exe depuis son répertoire (important pour trouver tiles.ini)
+          # ── Charger l'API Win32 FindWindow pour détecter l'apparition réelle ──
+          Add-Type @"
+            using System;
+            using System.Runtime.InteropServices;
+            public class Win32 {
+              [DllImport("user32.dll", SetLastError=true)]
+              public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+              [DllImport("user32.dll")]
+              public static extern bool IsWindowVisible(IntPtr hWnd);
+              [DllImport("user32.dll")]
+              public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+            }
+            public struct RECT { public int Left, Top, Right, Bottom; }
+"@
+
+          # ── Lancer l'exe ────────────────────────────────────────────────────
           $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName = (Resolve-Path "test_dir\TileLauncher.exe").Path
+          $psi.FileName         = (Resolve-Path "test_dir\TileLauncher.exe").Path
           $psi.WorkingDirectory = (Resolve-Path "test_dir").Path
-          $psi.UseShellExecute = $true
-          $proc = [System.Diagnostics.Process]::Start($psi)
+          $psi.UseShellExecute  = $true
+          $chrono = [System.Diagnostics.Stopwatch]::StartNew()
+          $proc   = [System.Diagnostics.Process]::Start($psi)
+          Write-Host "Exe lancé (PID $($proc.Id)) — attente fenêtre..."
 
-          # Attendre que la fenêtre soit dessinée
-          Write-Host "Attente rendu fenêtre (6s)..."
-          Start-Sleep -Seconds 6
+          # ── Polling FindWindow jusqu'à apparition de la fenêtre ─────────────
+          $timeout   = 30       # secondes max
+          $interval  = 100      # ms entre chaque sonde
+          $hwnd      = [IntPtr]::Zero
+          $launched  = $false
 
-          # Vérifier que le process est toujours vivant avant screenshot
-          $proc.Refresh()
-          if ($proc.HasExited) {
-            Write-Error "FAIL — exe crashé avant le screenshot (exit code $($proc.ExitCode))"
+          while ($chrono.Elapsed.TotalSeconds -lt $timeout) {
+            # Chercher par titre partiel via EnumWindows n'est pas dispo simplement,
+            # on cherche donc toutes les fenêtres du process
+            $proc.Refresh()
+            if ($proc.HasExited) {
+              Write-Error "FAIL — exe crashé pendant le démarrage (exit code $($proc.ExitCode))"
+              exit 1
+            }
+            # Récupérer la MainWindowHandle (PyInstaller/Qt la remonte quand la fenêtre est prête)
+            if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
+              $hwnd = $proc.MainWindowHandle
+              if ([Win32]::IsWindowVisible($hwnd)) {
+                $launched = $true
+                break
+              }
+            }
+            Start-Sleep -Milliseconds $interval
+          }
+
+          $chrono.Stop()
+          $ms = [math]::Round($chrono.Elapsed.TotalMilliseconds)
+          $s  = [math]::Round($chrono.Elapsed.TotalSeconds, 2)
+
+          if (-not $launched) {
+            Write-Error "FAIL — fenêtre non apparue après ${timeout}s"
             exit 1
           }
 
-          # Capture écran via .NET
+          # ── Rapport de temps ────────────────────────────────────────────────
+          Write-Host ""
+          Write-Host "══════════════════════════════════════════"
+          Write-Host "  ⏱  Temps de lancement : ${s} s (${ms} ms)"
+          if ($s -lt 2)  { Write-Host "  ✅ Excellent  (< 2s)"  }
+          elseif ($s -lt 4) { Write-Host "  ✅ Bon       (< 4s)"  }
+          elseif ($s -lt 8) { Write-Host "  ⚠️  Moyen    (< 8s)"  }
+          else              { Write-Host "  ❌ Lent      (>= 8s)" }
+          Write-Host "══════════════════════════════════════════"
+          Write-Host ""
+
+          # Exporter pour le résumé GitHub
+          echo "LAUNCH_MS=$ms"   >> $env:GITHUB_ENV
+          echo "LAUNCH_S=$s"     >> $env:GITHUB_ENV
+
+          # Petite pause pour que Qt finisse de dessiner
+          Start-Sleep -Milliseconds 500
+
+          # ── Screenshot ──────────────────────────────────────────────────────
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
-          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          $bmp    = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+          $gfx    = [System.Drawing.Graphics]::FromImage($bmp)
           $gfx.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
           $bmp.Save("test_dir\screenshot.png")
           $gfx.Dispose(); $bmp.Dispose()
 
-          $sz = [math]::Round((Get-Item "test_dir\screenshot.png").Length / 1KB, 0)
-          Write-Host "PASS — screenshot capturé (${sz} Ko, $($screen.Width)x$($screen.Height))"
+          $sz = [math]::Round((Get-Item "test_dir\screenshot.png").Length / 1KB)
+          Write-Host "PASS — screenshot capturé (${sz} Ko, $($screen.Width)×$($screen.Height)px)"
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
       - name: "TEST 5 : Contenu tiles.ini (8 tuiles)"
@@ -338,14 +396,33 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          # Récupérer le temps de lancement depuis l'env (peut être vide si test 4 a échoué)
+          $ms = if ($env:LAUNCH_MS) { $env:LAUNCH_MS } else { "N/A" }
+          $s  = if ($env:LAUNCH_S)  { $env:LAUNCH_S  } else { "N/A" }
+          $perf = if ($env:LAUNCH_S) {
+            $v = [double]$env:LAUNCH_S
+            if ($v -lt 2)      { "⚡ Excellent (< 2s)" }
+            elseif ($v -lt 4)  { "✅ Bon (< 4s)"       }
+            elseif ($v -lt 8)  { "⚠️ Moyen (< 8s)"     }
+            else               { "❌ Lent (>= 8s)"      }
+          } else { "—" }
+
           echo "## 🧪 Résultats des tests" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
           echo "| # | Test | Résultat |" >> $env:GITHUB_STEP_SUMMARY
           echo "|---|------|----------|" >> $env:GITHUB_STEP_SUMMARY
           echo "| 1 | Exe présent et taille correcte | ✅ |" >> $env:GITHUB_STEP_SUMMARY
           echo "| 2 | tiles.ini présent | ✅ |" >> $env:GITHUB_STEP_SUMMARY
           echo "| 3 | Démarrage sans crash (5s) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 4 | Screenshot fenêtre | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 4 | Temps de lancement + Screenshot | ✅ |" >> $env:GITHUB_STEP_SUMMARY
           echo "| 5 | 8 tuiles configurées | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "## ⏱️ Performance de démarrage" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Métrique | Valeur |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Temps jusqu'à fenêtre visible | **${s} s** (${ms} ms) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Appréciation | $perf |" >> $env:GITHUB_STEP_SUMMARY
           echo "" >> $env:GITHUB_STEP_SUMMARY
           echo "📸 Screenshot disponible dans les Artifacts" >> $env:GITHUB_STEP_SUMMARY
 
