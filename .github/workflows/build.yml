@@ -164,11 +164,18 @@ jobs:
             `
             --upx-dir "C:\Windows\System32" `
             --upx-exclude "vcruntime140.dll" `
+            --upx-exclude "vcruntime140_1.dll" `
             --upx-exclude "python3.dll" `
             --upx-exclude "python311.dll" `
             --upx-exclude "MSVCP140.dll" `
-            `
-            --strip `
+            --upx-exclude "MSVCP140_1.dll" `
+            --upx-exclude "Qt5Core.dll" `
+            --upx-exclude "Qt5Gui.dll" `
+            --upx-exclude "Qt5Widgets.dll" `
+            --upx-exclude "Qt5PrintSupport.dll" `
+            --upx-exclude "Qt5WinExtras.dll" `
+            --upx-exclude "qwindows.dll" `
+            --upx-exclude "qwindowsvistastyle.dll" `
             tile_launcher.py
 
       # ── 7. Rapport de taille avant/après ─────────────────────────────────
@@ -252,21 +259,53 @@ jobs:
       - name: "TEST 3 : Démarrage sans crash (5 secondes)"
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" -PassThru
+          # Lancer avec redirection stderr pour capturer les erreurs DLL
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName  = (Resolve-Path "test_dir\TileLauncher.exe").Path
+          $psi.WorkingDirectory = (Resolve-Path "test_dir").Path
+          $psi.UseShellExecute = $true   # Requis pour les apps GUI PyInstaller
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          Write-Host "PID : $($proc.Id) — attente 5 secondes..."
           Start-Sleep -Seconds 5
           $proc.Refresh()
           if ($proc.HasExited) {
-            Write-Error "FAIL — crash (exit code $($proc.ExitCode))"
+            $code = $proc.ExitCode
+            Write-Host "Code de sortie : $code"
+            # Récupérer les erreurs dans le journal Windows
+            $errors = Get-WinEvent -LogName Application -MaxEvents 10 -ErrorAction SilentlyContinue |
+              Where-Object { $_.TimeCreated -gt (Get-Date).AddMinutes(-2) -and $_.LevelDisplayName -eq "Error" }
+            if ($errors) {
+              Write-Host "--- Dernières erreurs Windows ---"
+              $errors | ForEach-Object { Write-Host "  $($_.Message.Substring(0, [Math]::Min(200,$_.Message.Length)))" }
+            }
+            Write-Error "FAIL — processus terminé après 5s (exit code : $code)"
             exit 1
           }
-          Write-Host "PASS — processus vivant (PID $($proc.Id))"
+          Write-Host "PASS — processus vivant après 5 secondes (PID $($proc.Id))"
           Stop-Process -Id $proc.Id -Force
 
       - name: "TEST 4 : Screenshot"
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath "test_dir\TileLauncher.exe" -PassThru
-          Start-Sleep -Seconds 4
+          # Démarrer l'exe depuis son répertoire (important pour trouver tiles.ini)
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = (Resolve-Path "test_dir\TileLauncher.exe").Path
+          $psi.WorkingDirectory = (Resolve-Path "test_dir").Path
+          $psi.UseShellExecute = $true
+          $proc = [System.Diagnostics.Process]::Start($psi)
+
+          # Attendre que la fenêtre soit dessinée
+          Write-Host "Attente rendu fenêtre (6s)..."
+          Start-Sleep -Seconds 6
+
+          # Vérifier que le process est toujours vivant avant screenshot
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            Write-Error "FAIL — exe crashé avant le screenshot (exit code $($proc.ExitCode))"
+            exit 1
+          }
+
+          # Capture écran via .NET
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
           $bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
@@ -274,8 +313,10 @@ jobs:
           $gfx.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
           $bmp.Save("test_dir\screenshot.png")
           $gfx.Dispose(); $bmp.Dispose()
+
+          $sz = [math]::Round((Get-Item "test_dir\screenshot.png").Length / 1KB, 0)
+          Write-Host "PASS — screenshot capturé (${sz} Ko, $($screen.Width)x$($screen.Height))"
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          Write-Host "PASS — screenshot capturé"
 
       - name: "TEST 5 : Contenu tiles.ini (8 tuiles)"
         shell: pwsh
