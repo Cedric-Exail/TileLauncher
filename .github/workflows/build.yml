@@ -358,6 +358,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
@@ -367,7 +370,9 @@ jobs:
       - name: Extract ZIP
         shell: pwsh
         run: |
-          Expand-Archive -Path profile_dir\TileLauncher_Win11_x64.zip -DestinationPath profile_dir -Force
+          Expand-Archive -Path "profile_dir/TileLauncher_Win11_x64.zip" -DestinationPath "profile_dir" -Force
+          Write-Host "Contenu profile_dir:"
+          dir profile_dir
 
       - name: Setup Python 3.11 x64
         uses: actions/setup-python@v5
@@ -378,29 +383,14 @@ jobs:
       - name: Install PyQt5
         run: pip install PyQt5==5.15.10 -q
 
-      - name: Checkout source
-        uses: actions/checkout@v4
-
       - name: "PROFILING : temps de demarrage par etape"
         shell: pwsh
         run: |
-          # Copier le tiles.ini depuis l'artifact
-          Copy-Item "profile_dir/tiles.ini" "tiles.ini"
-
-          # Injecter QT_QPA_PLATFORM pour tourner headless
+          Copy-Item "profile_dir/tiles.ini" "tiles.ini" -Force
           $env:QT_QPA_PLATFORM = "offscreen"
-
-          # Lancer le script de profiling et capturer la sortie
           Write-Host "=== Lancement du profiling ==="
           python tile_launcher.py 2>&1
           Write-Host "=== Fin du profiling ==="
-
-      - name: Profile summary
-        if: always()
-        shell: pwsh
-        run: |
-          echo "## Profiling demarrage TileLauncher" >> $env:GITHUB_STEP_SUMMARY
-          echo "Voir les logs du step precedent pour le detail par etape." >> $env:GITHUB_STEP_SUMMARY
 
   # ════════════════════════════════════════════════════════════════════════
   release:
