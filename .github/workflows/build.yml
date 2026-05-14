@@ -184,14 +184,29 @@ jobs:
       - name: "TEST 3 : Demarrage sans crash (5s)"
         shell: pwsh
         run: |
+          # Activer le bureau virtuel Windows (requis sur runner headless GitHub)
+          Add-Type -AssemblyName System.Windows.Forms | Out-Null
+          Write-Host "Resolution: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
+
           $psi = New-Object System.Diagnostics.ProcessStartInfo
           $psi.FileName         = (Resolve-Path "test_dir\TileLauncher.exe").Path
           $psi.WorkingDirectory = (Resolve-Path "test_dir").Path
           $psi.UseShellExecute  = $true
           $proc = [System.Diagnostics.Process]::Start($psi)
-          Start-Sleep -Seconds 5
+          Write-Host "PID: $($proc.Id)"
+          Start-Sleep -Seconds 8
           $proc.Refresh()
+
+          # Log toutes les fenetres ouvertes pour diagnostic
+          $shell = New-Object -ComObject Shell.Application
+          Write-Host "--- Fenetres ouvertes ---"
+          Get-Process | Where-Object { $_.MainWindowTitle -ne "" } | ForEach-Object {
+            Write-Host "  PID $($_.Id) | $($_.ProcessName) | $($_.MainWindowTitle)"
+          }
+          Write-Host "--- Fin fenetres ---"
+
           if ($proc.HasExited) {
+            Write-Host "Code de sortie: $($proc.ExitCode)"
             Write-Error "FAIL - crash (exit code $($proc.ExitCode))"
             exit 1
           }
@@ -243,6 +258,7 @@ jobs:
 
           $launched = $false
           $timeout  = 30
+          $lastLog  = 0
           while ($chrono.Elapsed.TotalSeconds -lt $timeout) {
             $proc.Refresh()
             if ($proc.HasExited) {
@@ -253,6 +269,16 @@ jobs:
               $launched = $true
               break
             }
+            # Log toutes les 5 secondes
+            $elapsed = [math]::Floor($chrono.Elapsed.TotalSeconds)
+            if ($elapsed -gt $lastLog -and $elapsed % 5 -eq 0) {
+              $lastLog = $elapsed
+              Write-Host "${elapsed}s - en attente... (HasVisibleWindow=$([Win32Helper]::HasVisibleWindow($proc.Id)))"
+              # Lister toutes les fenetres du systeme pour diagnostic
+              Get-Process | Where-Object { $_.MainWindowTitle -ne "" } | ForEach-Object {
+                Write-Host "  Fenetre: PID=$($_.Id) Nom=$($_.ProcessName) Titre=$($_.MainWindowTitle)"
+              }
+            }
             Start-Sleep -Milliseconds 100
           }
 
@@ -261,6 +287,15 @@ jobs:
           $s  = [math]::Round($chrono.Elapsed.TotalSeconds, 2)
 
           if (-not $launched) {
+            # Diagnostic final
+            Write-Host "--- Etat final du process ---"
+            $proc.Refresh()
+            Write-Host "HasExited: $($proc.HasExited)"
+            Write-Host "MainWindowHandle: $($proc.MainWindowHandle)"
+            Write-Host "Threads: $($proc.Threads.Count)"
+            Get-Process | Where-Object { $_.Id -eq $proc.Id -or $_.MainWindowTitle -ne "" } | ForEach-Object {
+              Write-Host "  PID=$($_.Id) | $($_.ProcessName) | Handle=$($_.MainWindowHandle) | Titre=$($_.MainWindowTitle)"
+            }
             Write-Error "FAIL - fenetre non apparue apres ${timeout}s"
             exit 1
           }
