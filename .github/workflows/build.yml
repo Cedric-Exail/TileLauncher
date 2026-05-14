@@ -288,7 +288,7 @@ jobs:
         shell: pwsh
         run: |
           # ── Charger l'API Win32 FindWindow pour détecter l'apparition réelle ──
-          Add-Type @"
+          $code = @'
             using System;
             using System.Runtime.InteropServices;
             public class Win32 {
@@ -300,7 +300,8 @@ jobs:
               public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
             }
             public struct RECT { public int Left, Top, Right, Bottom; }
-"@
+'@
+          Add-Type -TypeDefinition $code
 
           # ── Lancer l'exe ────────────────────────────────────────────────────
           $psi = New-Object System.Diagnostics.ProcessStartInfo
