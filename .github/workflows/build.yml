@@ -410,7 +410,7 @@ jobs:
           path: dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.3.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "TileLauncher v1.0.${{ github.run_number }} - Windows 11 x64"
