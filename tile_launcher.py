@@ -340,6 +340,7 @@ class TileLauncher(QWidget):
     def _setup_window(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_DeleteOnClose)
         self.setWindowTitle(self._app_cfg["title"])
         scr = QApplication.primaryScreen().availableGeometry()
         self.setFixedSize(scr.width() // 2, scr.height() // 2)
@@ -451,6 +452,10 @@ class TileLauncher(QWidget):
         self.title_lbl.setText(self._app_cfg["title"])
         self._populate_grid(tiles)
 
+    def closeEvent(self, e):
+        e.accept()
+        QApplication.instance().quit()
+
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton and e.y() < TITLEBAR_H:
             self._drag_pos = e.globalPos() - self.frameGeometry().topLeft()
@@ -467,6 +472,7 @@ class TileLauncher(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.setQuitOnLastWindowClosed(True)
     window = TileLauncher()
     window.show()
     sys.exit(app.exec_())
