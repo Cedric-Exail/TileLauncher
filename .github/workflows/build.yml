@@ -1,5 +1,8 @@
 name: Build & Test TileLauncher — Windows 11 x64
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [ main ]
@@ -14,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python 3.11 x64
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           architecture: 'x64'
@@ -133,7 +136,7 @@ jobs:
           echo "ZIP_MB=$zipMB" >> $env:GITHUB_ENV
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: TileLauncher_Win11_x64
           path: dist\TileLauncher_Win11_x64.zip
@@ -155,7 +158,7 @@ jobs:
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: TileLauncher_Win11_x64
           path: test_dir
@@ -316,7 +319,7 @@ jobs:
 
       - name: Upload screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: test-screenshot
           path: test_dir\screenshot.png
@@ -361,10 +364,10 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: TileLauncher_Win11_x64
           path: profile_dir
@@ -377,7 +380,7 @@ jobs:
           dir profile_dir
 
       - name: Setup Python 3.11 x64
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           architecture: 'x64'
@@ -401,13 +404,13 @@ jobs:
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: TileLauncher_Win11_x64
           path: dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.3.2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "TileLauncher v1.0.${{ github.run_number }} - Windows 11 x64"
