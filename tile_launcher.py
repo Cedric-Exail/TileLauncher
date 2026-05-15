@@ -36,15 +36,15 @@ SPACING     = 5
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG_COLOR      = "#0f1117"
-TITLEBAR_BG   = "#5f9ea0"
-TITLEBAR_TEXT = "#ffffff"
+TITLEBAR_BG   = "#00FFDA"
+TITLEBAR_TEXT = "#000000"
 TILE_BG       = "#1a1d27"
 TILE_HOVER    = "#252840"
 TILE_PRESS    = "#1e2235"
-ACCENT        = "#5c6ef8"
-ACCENT2       = "#8b5cf6"
+ACCENT        = "#00FFDA"
+ACCENT2       = "#00ccb0"
 TEXT_COLOR    = "#e8eaf6"
-BORDER_COLOR  = "#2a2d3e"
+BORDER_COLOR  = "#007d6b"
 
 # ── Styles précalculés (une seule fois, pas à chaque widget) ──────────────────
 _STYLE_NORMAL = (
@@ -394,7 +394,7 @@ class TileLauncher(QWidget):
         btn_style = (
             f"QPushButton{{background:transparent;color:{TITLEBAR_TEXT};"
             f"border:none;font-size:15px;font-weight:bold;}}"
-            f"QPushButton:hover{{background:rgba(255,255,255,0.22);border-radius:5px;}}"
+            f"QPushButton:hover{{background:rgba(0,0,0,0.12);border-radius:5px;}}"
         )
         reload_btn = QPushButton("↺")
         reload_btn.setFixedSize(26, 26)
@@ -409,7 +409,7 @@ class TileLauncher(QWidget):
         close_btn.setStyleSheet(
             f"QPushButton{{background:transparent;color:{TITLEBAR_TEXT};"
             f"border:none;font-size:11px;font-weight:bold;}}"
-            f"QPushButton:hover{{background:rgba(220,60,60,0.75);border-radius:5px;}}"
+            f"QPushButton:hover{{background:rgba(220,60,60,0.85);color:#ffffff;border-radius:5px;}}"
         )
         close_btn.clicked.connect(self.close)
 
