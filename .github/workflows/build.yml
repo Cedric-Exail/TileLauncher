@@ -31,11 +31,32 @@ jobs:
           modules:   ''
           cache:     true
 
-      # ── Configuration MSVC via Developer Command Prompt ────────────────
+      # ── Recherche MSVC via vswhere ─────────────────────────────────────
+      - name: Find MSVC
+        shell: pwsh
+        run: |
+          $vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            $vswhere = "C:/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+          }
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualCpp.Tools.HostX64.TargetX64 -property installationPath 2>$null
+          if (-not $vsPath) {
+            $vsPath = & $vswhere -latest -products * -property installationPath 2>$null
+          }
+          Write-Host "VS path: $vsPath"
+          $vcvars = "$vsPath/VC/Auxiliary/Build/vcvars64.bat"
+          if (-not (Test-Path $vcvars)) {
+            Write-Error "vcvars64.bat introuvable"
+            exit 1
+          }
+          echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
+          Write-Host "VCVARS=$vcvars"
+
+      # ── Configuration CMake MSVC ───────────────────────────────────────
       - name: Configure CMake (MSVC)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "%VCVARS%"
           cmake -B build -G "Ninja" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl ^
@@ -46,8 +67,9 @@ jobs:
       - name: Build
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "%VCVARS%"
           cmake --build build --config Release --parallel
+
 
       # ── Vérification ──────────────────────────────────────────────────
       - name: Verify build
