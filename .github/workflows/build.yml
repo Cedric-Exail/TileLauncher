@@ -87,11 +87,18 @@ jobs:
       - name: Verify build
         shell: pwsh
         run: |
-          $exe = "build\TileLauncher.exe"
-          if (-not (Test-Path $exe)) { Write-Error "Exe introuvable"; exit 1 }
-          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
-          Write-Host "TileLauncher.exe : $mb Mo"
-          dir build\ | Where-Object { $_.Extension -in ".exe",".dll" }
+          # Chercher l exe dans tout le dossier build
+          Write-Host "=== Contenu de build/ ==="
+          Get-ChildItem "build" -Recurse -Include "*.exe","*.dll" |
+            Select-Object FullName, @{N="Mo";E={[math]::Round($_.Length/1MB,2)}}
+
+          $exe = Get-ChildItem "build" -Recurse -Filter "TileLauncher.exe" |
+            Select-Object -First 1
+          if (-not $exe) { Write-Error "Exe introuvable"; exit 1 }
+
+          $mb = [math]::Round($exe.Length / 1MB, 2)
+          Write-Host "FOUND: $($exe.FullName) ($mb Mo)"
+          echo "EXE_FULL=$($exe.FullName)" >> $env:GITHUB_ENV
 
       # ── Copie tiles.ini ───────────────────────────────────────────────
       - name: Copy config
@@ -103,7 +110,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path deploy | Out-Null
-          Copy-Item "build\TileLauncher.exe" "deploy\TileLauncher.exe" -Force
+          Copy-Item "$env:EXE_FULL" "deploy\TileLauncher.exe" -Force
           Copy-Item "tiles.ini" "deploy\tiles.ini" -Force
 
           Compress-Archive -Path "deploy\*" `
