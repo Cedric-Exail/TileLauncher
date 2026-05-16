@@ -20,16 +20,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # ── Cache vcpkg Qt6 statique ──────────────────────────────────────
-      - name: Cache vcpkg Qt6 static
-        id: cache-qt-static
-        uses: actions/cache@v4
-        with:
-          path: C:/vcpkg/installed
-          key: vcpkg-qt6-static-msvc2022-x64-${{ hashFiles('**/CMakeLists.txt') }}
-          restore-keys: |
-            vcpkg-qt6-static-msvc2022-x64-
-
       # ── Recherche MSVC via vswhere ─────────────────────────────────────
       - name: Find MSVC
         shell: pwsh
@@ -43,23 +33,21 @@ jobs:
           echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
           Write-Host "VCVARS=$vcvars"
 
-      # ── Installation Qt6 statique via vcpkg ─────────────────────────
-      - name: Install Qt6 static via vcpkg
-        shell: cmd
+      # ── Qt6 MSVC pre-compile via aqt ──────────────────────────────────
+      - name: Install Qt6 (aqt)
+        shell: pwsh
         run: |
-          call "%VCVARS%"
-          cd C:\vcpkg
-          git pull --quiet
-          bootstrap-vcpkg.bat -disableMetrics
-          vcpkg install qtbase:x64-windows-static --no-print-usage
-          if errorlevel 1 ( echo VCPKG FAILED & exit /b 1 )
-          echo.
-          echo === Qt6 packages installes ===
-          dir C:\vcpkg\installed\x64-windows-static\share | findstr /i qt
-          echo ==============================
+          pip install aqtinstall --quiet
+          aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 `
+            --outputdir C:/Qt `
+            --archives qtbase
+          $qt6cfg = "C:/Qt/6.8.3/msvc2022_64/lib/cmake/Qt6/Qt6Config.cmake"
+          if (Test-Path $qt6cfg) { Write-Host "Qt6Config.cmake OK" }
+          else { Write-Error "Qt6Config.cmake introuvable"; exit 1 }
+          echo "QT_DIR=C:/Qt/6.8.3/msvc2022_64" >> $env:GITHUB_ENV
 
       # ── Configure CMake ────────────────────────────────────────────────
-      - name: Configure CMake (MSVC + vcpkg static)
+      - name: Configure CMake (MSVC)
         shell: cmd
         run: |
           call "%VCVARS%"
@@ -67,14 +55,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl ^
             -DCMAKE_CXX_COMPILER=cl ^
-            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
-            -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
-            -DCMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows-static
+            -DCMAKE_PREFIX_PATH="%QT_DIR%"
           if errorlevel 1 (
-            echo.
-            echo === CMakeCache.txt ===
-            type build\CMakeCache.txt 2>nul | findstr /i "Qt6 ERROR"
-            echo === CMake Logs ===
             type build\CMakeFiles\CMakeError.log 2>nul
             exit /b 1
           )
@@ -110,13 +92,20 @@ jobs:
         shell: pwsh
         run: Copy-Item "tiles.ini" "build\tiles.ini" -Force
 
-      # ── Packaging ZIP — exe seul (statique, aucune DLL) ──────────────
+      # ── Packaging ZIP ─────────────────────────────────────────────────
       - name: Package ZIP
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path deploy | Out-Null
-          Copy-Item "$env:EXE_FULL" "deploy\TileLauncher.exe" -Force
-          Copy-Item "tiles.ini" "deploy\tiles.ini" -Force
+          # Copier exe + DLL Qt deployees par windeployqt (POST_BUILD)
+          $exeDir = Split-Path $env:EXE_FULL
+          Get-ChildItem $exeDir -Include "*.exe","*.dll" -Recurse |
+            Copy-Item -Destination "deploy/" -Force
+          foreach ($plug in @("platforms","styles","imageformats")) {
+            $src = Join-Path $exeDir $plug
+            if (Test-Path $src) { Copy-Item $src "deploy/" -Recurse -Force }
+          }
+          Copy-Item "tiles.ini" "deploy/tiles.ini" -Force
 
           Compress-Archive -Path "deploy\*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
