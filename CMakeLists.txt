@@ -33,13 +33,14 @@ else()
     target_link_libraries(TileLauncher PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
 endif()
 
-# Optimisation release
+# Optimisation release — flags selon le compilateur
 target_compile_options(TileLauncher PRIVATE
-    $<$<CONFIG:Release>:/O2 /GL>          # MSVC
-    $<$<CXX_COMPILER_ID:GNU>:-O3>         # MinGW
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/O2 /GL>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-O3>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-O3>
 )
 target_link_options(TileLauncher PRIVATE
-    $<$<CONFIG:Release>:/LTCG>            # Link-time code generation MSVC
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/LTCG>
 )
 
 # Déploiement Qt (windeployqt)
