@@ -7,7 +7,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-# Qt6
+# ── Liaison statique runtime MSVC (/MT au lieu de /MD) ────────────────────────
+# Évite la dépendance à vcruntime140.dll et msvcp140.dll
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Qt6 — doit être une build statique de Qt
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 # Sources
@@ -21,37 +25,34 @@ set(HEADERS
     src/Logger.h
 )
 
-# Exécutable Windows (sans console)
+# Exécutable Windows sans console
 if(WIN32)
     add_executable(TileLauncher WIN32 ${SOURCES} ${HEADERS})
-    target_link_libraries(TileLauncher PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Widgets
-        shell32 user32 gdi32    # Windows API pour ExtractIconEx, SetWindowPos
-    )
 else()
     add_executable(TileLauncher ${SOURCES} ${HEADERS})
-    target_link_libraries(TileLauncher PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
 endif()
 
-# Optimisation release — flags selon le compilateur
+# ── Liens statiques Qt6 + Windows API ────────────────────────────────────────
+target_link_libraries(TileLauncher PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    # Windows API
+    shell32 user32 gdi32 ole32 oleaut32 uuid
+    winspool winmm imm32 comdlg32 advapi32
+    # Qt plugins statiques requis
+    Qt6::QWindowsIntegrationPlugin
+    Qt6::QWindowsVistaStylePlugin
+    Qt6::QJpegPlugin
+    Qt6::QICOPlugin
+)
+
+# ── Optimisation MSVC release ─────────────────────────────────────────────────
 target_compile_options(TileLauncher PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/O2 /GL>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/O2 /GL /Gy>
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-O3>
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-O3>
 )
 target_link_options(TileLauncher PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/LTCG>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/LTCG /OPT:REF /OPT:ICF>
 )
-
-# Déploiement Qt (windeployqt)
-if(WIN32)
-    add_custom_command(TARGET TileLauncher POST_BUILD
-        COMMAND "${Qt6_DIR}/../../../bin/windeployqt.exe"
-                --release
-                --no-translations
-                --no-system-d3d-compiler
-                --no-opengl-sw
-                "$<TARGET_FILE:TileLauncher>"
-        COMMENT "Deploiement Qt..."
-    )
-endif()
