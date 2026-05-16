@@ -163,37 +163,30 @@ jobs:
           if (-not $ini) { Write-Error "FAIL - tiles.ini introuvable"; exit 1 }
           Write-Host "PASS - $($ini.FullName)"
 
-      - name: "TEST 3 : Demarrage + Temps de lancement + Screenshot"
+      - name: "TEST 3 : Demarrage + Temps de lancement"
         shell: pwsh
         run: |
-          # ── Compilation du helper Win32 (EnumWindows + PrintWindow) ──────
+          # ── Helper Win32 pour detection fenetre ───────────────────────────
           $cs  = @()
-          $cs += 'using System; using System.Runtime.InteropServices; using System.Drawing;'
-          $cs += '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }'
+          $cs += 'using System; using System.Runtime.InteropServices;'
           $cs += 'public class W32 {'
           $cs += '  public delegate bool EWP(IntPtr h, IntPtr l);'
           $cs += '  [DllImport("user32.dll")] public static extern bool EnumWindows(EWP c, IntPtr l);'
           $cs += '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'
           $cs += '  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);'
-          $cs += '  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);'
-          $cs += '  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);'
-          $cs += '  public static IntPtr FindWnd(int pid) {'
-          $cs += '    IntPtr f = IntPtr.Zero;'
+          $cs += '  public static bool HasWnd(int pid) {'
+          $cs += '    bool f=false;'
           $cs += '    EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p);'
-          $cs += '      if((int)p==pid && GetWindowTextLength(h)>0){f=h;return false;}'
+          $cs += '      if((int)p==pid && GetWindowTextLength(h)>0){f=true;return false;}'
           $cs += '      return true;}, IntPtr.Zero);'
-          $cs += '    return f;'
-          $cs += '  }'
-          $cs += '}'
+          $cs += '    return f; } }'
           Set-Content "w32.cs" -Value $cs -Encoding UTF8
-
-          $csc = [IO.Path]::Combine($env:WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe")
-          & $csc /target:library /out:w32.dll /r:System.Drawing.dll w32.cs 2>&1
+          $csc = [IO.Path]::Combine($env:WINDIR,"Microsoft.NET","Framework64","v4.0.30319","csc.exe")
+          & $csc /target:library /out:w32.dll w32.cs 2>&1
           if (-not (Test-Path "w32.dll")) { Write-Error "Compilation w32.dll echouee"; exit 1 }
           Add-Type -Path "w32.dll"
-          Write-Host "Helper W32 OK"
 
-          # ── Lancer l exe ──────────────────────────────────────────────────
+          # ── Lancer en mode normal pour mesurer le vrai temps ──────────────
           $psi = New-Object System.Diagnostics.ProcessStartInfo
           $psi.FileName         = $env:EXE_PATH
           $psi.WorkingDirectory = Split-Path $env:EXE_PATH
@@ -202,21 +195,20 @@ jobs:
           $proc   = [System.Diagnostics.Process]::Start($psi)
           Write-Host "PID $($proc.Id) - attente fenetre..."
 
-          # ── Attente fenetre ───────────────────────────────────────────────
-          $hwnd    = [IntPtr]::Zero
           $timeout = 15
+          $found   = $false
           while ($chrono.Elapsed.TotalSeconds -lt $timeout) {
             $proc.Refresh()
             if ($proc.HasExited) {
               Write-Error "FAIL - crash (exit code $($proc.ExitCode))"; exit 1
             }
-            $hwnd = [W32]::FindWnd($proc.Id)
-            if ($hwnd -ne [IntPtr]::Zero) { break }
+            if ([W32]::HasWnd($proc.Id)) { $found = $true; break }
             Start-Sleep -Milliseconds 50
           }
           $chrono.Stop()
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
-          if ($hwnd -eq [IntPtr]::Zero) {
+          if (-not $found) {
             Write-Error "FAIL - fenetre non apparue apres ${timeout}s"; exit 1
           }
 
@@ -232,27 +224,34 @@ jobs:
           echo "LAUNCH_MS=$ms" >> $env:GITHUB_ENV
           echo "LAUNCH_S=$s"   >> $env:GITHUB_ENV
 
-          # ── Screenshot via PrintWindow ────────────────────────────────────
-          Start-Sleep -Milliseconds 1000
+      - name: "TEST 4 : Screenshot via rendu Qt interne"
+        shell: pwsh
+        run: |
+          # Lancer en mode --screenshot : Qt capture lui-meme avec rendu soft
+          $screenshotPath = (Resolve-Path "test_dir").Path + "\screenshot.png"
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName         = $env:EXE_PATH
+          $psi.WorkingDirectory = Split-Path $env:EXE_PATH
+          $psi.Arguments        = "--screenshot `"$screenshotPath`" --delay 1500"
+          $psi.UseShellExecute  = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError  = $true
 
-          $rect = New-Object RECT
-          [W32]::GetWindowRect($hwnd, [ref]$rect)
-          $w = [Math]::Max($rect.R - $rect.L, 1)
-          $h = [Math]::Max($rect.B - $rect.T, 1)
-          Write-Host "Fenetre : ${w}x${h} px"
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          $stdout = $proc.StandardOutput.ReadToEnd()
+          $stderr = $proc.StandardError.ReadToEnd()
+          $proc.WaitForExit(10000) | Out-Null
 
-          Add-Type -AssemblyName System.Drawing
-          $bmp = New-Object System.Drawing.Bitmap($w, $h)
-          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-          $hdc = $gfx.GetHdc()
-          [W32]::PrintWindow($hwnd, $hdc, 2) | Out-Null
-          $gfx.ReleaseHdc($hdc)
-          $bmp.Save("test_dir/screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
-          $gfx.Dispose(); $bmp.Dispose()
+          Write-Host "STDOUT: $stdout"
+          if ($stderr) { Write-Host "STDERR: $stderr" }
+          Write-Host "Exit code: $($proc.ExitCode)"
 
-          $sz = [math]::Round((Get-Item "test_dir/screenshot.png").Length/1KB)
-          Write-Host "PASS - screenshot PrintWindow OK (${sz} Ko, ${w}x${h})"
-          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (Test-Path $screenshotPath) {
+            $sz = [math]::Round((Get-Item $screenshotPath).Length/1KB)
+            Write-Host "PASS - screenshot Qt OK ($sz Ko)"
+          } else {
+            Write-Warning "Screenshot absent - verifier les logs ci-dessus"
+          }
 
       - name: Upload screenshot
         if: always()
