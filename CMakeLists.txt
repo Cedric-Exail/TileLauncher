@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
+
+# ── vcpkg toolchain (doit être défini avant project()) ────────────────────────
+# Passé via -DCMAKE_TOOLCHAIN_FILE en ligne de commande
+# ou automatiquement si VCPKG_ROOT est défini
+
 project(TileLauncher VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,8 +16,14 @@ set(CMAKE_AUTORCC ON)
 # Évite la dépendance à vcruntime140.dll et msvcp140.dll
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-# Qt6 — doit être une build statique de Qt
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+# Qt6 statique via vcpkg
+set(Qt6_DIR "${CMAKE_PREFIX_PATH}")
+find_package(Qt6 REQUIRED COMPONENTS
+    Core Gui Widgets
+    # Plugins requis en compilation statique
+    CoreTools GuiTools WidgetsTools
+)
+qt_standard_project_setup()
 
 # Sources
 set(SOURCES
@@ -32,7 +43,7 @@ else()
     add_executable(TileLauncher ${SOURCES} ${HEADERS})
 endif()
 
-# ── Liens statiques Qt6 + Windows API ────────────────────────────────────────
+# ── Liens ─────────────────────────────────────────────────────────────────────
 target_link_libraries(TileLauncher PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -40,11 +51,15 @@ target_link_libraries(TileLauncher PRIVATE
     # Windows API
     shell32 user32 gdi32 ole32 oleaut32 uuid
     winspool winmm imm32 comdlg32 advapi32
-    # Qt plugins statiques requis
-    Qt6::QWindowsIntegrationPlugin
-    Qt6::QWindowsVistaStylePlugin
-    Qt6::QJpegPlugin
-    Qt6::QICOPlugin
+)
+
+# Plugins Qt statiques — requis pour que la fenêtre s'affiche
+qt_import_plugins(TileLauncher
+    INCLUDE Qt6::QWindowsIntegrationPlugin
+            Qt6::QWindowsVistaStylePlugin
+    EXCLUDE_BY_TYPE imageformats
+    EXCLUDE_BY_TYPE sqldrivers
+    EXCLUDE_BY_TYPE networkinformation
 )
 
 # ── Optimisation MSVC release ─────────────────────────────────────────────────
