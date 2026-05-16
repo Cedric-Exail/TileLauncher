@@ -43,32 +43,26 @@ jobs:
           echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
           Write-Host "VCVARS=$vcvars"
 
-      # ── Installation Qt6 statique via vcpkg + Configure + Build ─────────
-      - name: Install Qt6 static, Configure and Build
+      # ── Installation Qt6 statique via vcpkg ─────────────────────────
+      - name: Install Qt6 static via vcpkg
         shell: cmd
         run: |
           call "%VCVARS%"
-
-          :: Mise a jour vcpkg
           cd C:\vcpkg
           git pull --quiet
           bootstrap-vcpkg.bat -disableMetrics
-
-          :: Installation Qt6 statique (depuis cache si dispo)
           vcpkg install qtbase:x64-windows-static --no-print-usage
-          if errorlevel 1 exit /b 1
+          if errorlevel 1 ( echo VCPKG FAILED & exit /b 1 )
+          echo.
+          echo === Qt6 packages installes ===
+          dir C:\vcpkg\installed\x64-windows-static\share | findstr /i qt
+          echo ==============================
 
-          :: Verifier que Qt6Config.cmake est present
-          set QT6_DIR=C:\vcpkg\installed\x64-windows-static\share\Qt6
-          if not exist "%QT6_DIR%\Qt6Config.cmake" (
-            echo ERREUR: Qt6Config.cmake introuvable dans %QT6_DIR%
-            dir C:\vcpkg\installed\x64-windows-static\share\ 2>nul | findstr /i qt
-            exit /b 1
-          )
-          echo Qt6Config.cmake trouve dans %QT6_DIR%
-
-          :: Configure CMake
-          cd /d D:\a\TileLauncher\TileLauncher
+      # ── Configure CMake ────────────────────────────────────────────────
+      - name: Configure CMake (MSVC + vcpkg static)
+        shell: cmd
+        run: |
+          call "%VCVARS%"
           cmake -B build -G "Ninja" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl ^
@@ -76,9 +70,20 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
             -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
             -DCMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows-static
-          if errorlevel 1 exit /b 1
+          if errorlevel 1 (
+            echo.
+            echo === CMakeCache.txt ===
+            type build\CMakeCache.txt 2>nul | findstr /i "Qt6 ERROR"
+            echo === CMake Logs ===
+            type build\CMakeFiles\CMakeError.log 2>nul
+            exit /b 1
+          )
 
-          :: Compilation
+      # ── Compilation ────────────────────────────────────────────────────
+      - name: Build
+        shell: cmd
+        run: |
+          call "%VCVARS%"
           cmake --build build --config Release --parallel
           if errorlevel 1 exit /b 1
 
