@@ -20,58 +20,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # ── Cache Qt statique ─────────────────────────────────────────────
-      - name: Cache Qt static build
+      # ── Cache vcpkg Qt6 statique ──────────────────────────────────────
+      - name: Cache vcpkg Qt6 static
         id: cache-qt-static
         uses: actions/cache@v4
         with:
-          path: C:/Qt-static
-          key: qt-static-6.8.3-msvc2022-x64-v1
+          path: C:/vcpkg/installed
+          key: vcpkg-qt6-static-msvc2022-x64-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            vcpkg-qt6-static-msvc2022-x64-
 
-      # ── Recherche MSVC via vswhere (nécessaire pour build Qt) ──────────
-      - name: Find MSVC (early)
+      # ── Recherche MSVC via vswhere ─────────────────────────────────────
+      - name: Find MSVC
         shell: pwsh
         run: |
           $vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           $vsPath = & $vswhere -latest -products * -property installationPath 2>$null
           $vcvars = "$vsPath/VC/Auxiliary/Build/vcvars64.bat"
+          if (-not (Test-Path $vcvars)) {
+            Write-Error "vcvars64.bat introuvable dans $vsPath"; exit 1
+          }
           echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
           Write-Host "VCVARS=$vcvars"
 
-      # ── Build Qt6 statique (seulement si pas en cache) ─────────────────
-      - name: Build Qt6 static
+      # ── Installation Qt6 statique via vcpkg ───────────────────────────
+      - name: Install Qt6 static via vcpkg
         if: steps.cache-qt-static.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "%VCVARS%"
-
-          :: Télécharger Qt sources
-          pip install aqtinstall
-          aqt install-src windows 6.8.3 --outputdir C:/Qt-src
-
-          :: Configurer Qt en statique
-          mkdir C:/Qt-static
-          cd C:/Qt-src/6.8.3/Src
-
-          perl configure ^
-            -prefix C:/Qt-static ^
-            -static ^
-            -static-runtime ^
-            -release ^
-            -no-debug ^
-            -platform win32-msvc ^
-            -opensource -confirm-license ^
-            -nomake examples -nomake tests ^
-            -no-feature-sql ^
-            -no-feature-network ^
-            -no-feature-xml ^
-            -no-feature-dbus ^
-            -no-feature-testlib ^
-            -no-feature-concurrent ^
-            -no-feature-multimedia ^
-            -submodules qtbase
-
-          cmake --build . --parallel --target install
+          cd C:\vcpkg
+          git pull
+          bootstrap-vcpkg.bat -disableMetrics
+          vcpkg install ^
+            qtbase:x64-windows-static ^
+            --triplet x64-windows-static ^
+            --no-print-usage
 
       # ── Configuration CMake MSVC ───────────────────────────────────────
       - name: Configure CMake (MSVC)
@@ -82,7 +66,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl ^
             -DCMAKE_CXX_COMPILER=cl ^
-            -DCMAKE_PREFIX_PATH="C:/Qt-static"
+            -DCMAKE_PREFIX_PATH="C:/vcpkg/installed/x64-windows-static/share/Qt6" ^
+            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static
 
       # ── Compilation MSVC ───────────────────────────────────────────────
       - name: Build
