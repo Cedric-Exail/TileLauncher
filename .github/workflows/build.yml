@@ -20,37 +20,58 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # ── Qt6 MSVC 2022 x64 ─────────────────────────────────────────────
-      - name: Install Qt6
-        uses: jurplel/install-qt-action@v4
+      # ── Cache Qt statique ─────────────────────────────────────────────
+      - name: Cache Qt static build
+        id: cache-qt-static
+        uses: actions/cache@v4
         with:
-          version:   '6.8.3'
-          host:      'windows'
-          target:    'desktop'
-          arch:      'win64_msvc2022_64'
-          modules:   ''
-          cache:     true
+          path: C:/Qt-static
+          key: qt-static-6.8.3-msvc2022-x64-v1
 
-      # ── Recherche MSVC via vswhere ─────────────────────────────────────
-      - name: Find MSVC
+      # ── Recherche MSVC via vswhere (nécessaire pour build Qt) ──────────
+      - name: Find MSVC (early)
         shell: pwsh
         run: |
           $vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
-          if (-not (Test-Path $vswhere)) {
-            $vswhere = "C:/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
-          }
-          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualCpp.Tools.HostX64.TargetX64 -property installationPath 2>$null
-          if (-not $vsPath) {
-            $vsPath = & $vswhere -latest -products * -property installationPath 2>$null
-          }
-          Write-Host "VS path: $vsPath"
+          $vsPath = & $vswhere -latest -products * -property installationPath 2>$null
           $vcvars = "$vsPath/VC/Auxiliary/Build/vcvars64.bat"
-          if (-not (Test-Path $vcvars)) {
-            Write-Error "vcvars64.bat introuvable"
-            exit 1
-          }
           echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
           Write-Host "VCVARS=$vcvars"
+
+      # ── Build Qt6 statique (seulement si pas en cache) ─────────────────
+      - name: Build Qt6 static
+        if: steps.cache-qt-static.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "%VCVARS%"
+
+          :: Télécharger Qt sources
+          pip install aqtinstall
+          aqt install-src windows 6.8.3 --outputdir C:/Qt-src
+
+          :: Configurer Qt en statique
+          mkdir C:/Qt-static
+          cd C:/Qt-src/6.8.3/Src
+
+          perl configure ^
+            -prefix C:/Qt-static ^
+            -static ^
+            -static-runtime ^
+            -release ^
+            -no-debug ^
+            -platform win32-msvc ^
+            -opensource -confirm-license ^
+            -nomake examples -nomake tests ^
+            -no-feature-sql ^
+            -no-feature-network ^
+            -no-feature-xml ^
+            -no-feature-dbus ^
+            -no-feature-testlib ^
+            -no-feature-concurrent ^
+            -no-feature-multimedia ^
+            -submodules qtbase
+
+          cmake --build . --parallel --target install
 
       # ── Configuration CMake MSVC ───────────────────────────────────────
       - name: Configure CMake (MSVC)
@@ -61,7 +82,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl ^
             -DCMAKE_CXX_COMPILER=cl ^
-            -DCMAKE_PREFIX_PATH="%Qt6_DIR%"
+            -DCMAKE_PREFIX_PATH="C:/Qt-static"
 
       # ── Compilation MSVC ───────────────────────────────────────────────
       - name: Build
@@ -86,29 +107,20 @@ jobs:
         shell: pwsh
         run: Copy-Item "tiles.ini" "build\tiles.ini" -Force
 
-      # ── Packaging ZIP ─────────────────────────────────────────────────
+      # ── Packaging ZIP — exe seul (statique, aucune DLL) ──────────────
       - name: Package ZIP
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path deploy | Out-Null
-
-          Get-ChildItem "build\" -Include "*.exe","*.dll" -Recurse |
-            Copy-Item -Destination "deploy\" -Force
-          Copy-Item "build\tiles.ini" "deploy\tiles.ini" -Force
-
-          foreach ($plug in @("platforms","styles","imageformats")) {
-            $src = "build\$plug"
-            if (Test-Path $src) {
-              Copy-Item $src "deploy\" -Recurse -Force
-            }
-          }
+          Copy-Item "build\TileLauncher.exe" "deploy\TileLauncher.exe" -Force
+          Copy-Item "tiles.ini" "deploy\tiles.ini" -Force
 
           Compress-Archive -Path "deploy\*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
 
           $exeMB = [math]::Round((Get-Item "deploy\TileLauncher.exe").Length / 1MB, 2)
           $zipMB = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length / 1MB, 1)
-          Write-Host "exe: $exeMB Mo  zip: $zipMB Mo"
+          Write-Host "exe standalone: $exeMB Mo  zip: $zipMB Mo"
           echo "EXE_MB=$exeMB" >> $env:GITHUB_ENV
           echo "ZIP_MB=$zipMB" >> $env:GITHUB_ENV
 
