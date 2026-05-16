@@ -17,12 +17,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Qt6 statique via vcpkg
-set(Qt6_DIR "${CMAKE_PREFIX_PATH}")
-find_package(Qt6 REQUIRED COMPONENTS
-    Core Gui Widgets
-    # Plugins requis en compilation statique
-    CoreTools GuiTools WidgetsTools
-)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 qt_standard_project_setup()
 
 # Sources
