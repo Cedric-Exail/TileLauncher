@@ -171,40 +171,45 @@ jobs:
           if (-not $ini) { Write-Error "FAIL - tiles.ini introuvable"; exit 1 }
           Write-Host "PASS - $($ini.FullName)"
 
-      - name: "TEST 3 : Ecriture helper EnumWindows"
+      - name: "TEST 3 : Helper Win32 compile dans TEST 4 - skip"
         shell: pwsh
-        run: |
-          $line1 = 'using System; using System.Runtime.InteropServices; using System.Text;'
-          $line2 = 'public class Win32Helper {'
-          $line3 = '  public delegate bool EnumWndProc(IntPtr h, IntPtr l);'
-          $line4 = '  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWndProc c, IntPtr l);'
-          $line5 = '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'
-          $line6 = '  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);'
-          $line7 = '  public static bool HasWindowForPid(int pid) {'
-          $line8 = '    bool f=false;'
-          $line9 = '    EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p);'
-          $lineA = '      if((int)p==pid && GetWindowTextLength(h)>0){f=true;return false;} return true;},IntPtr.Zero);'
-          $lineB = '    return f;}}'
-          Set-Content -Path "win32helper.cs" -Value @($line1,$line2,$line3,$line4,$line5,$line6,$line7,$line8,$line9,$lineA,$lineB) -Encoding UTF8
-          Write-Host "win32helper.cs ecrit"
+        run: Write-Host "Helper compile directement dans TEST 4"
 
-      - name: "TEST 3b : Compilation helper"
+      - name: "TEST 4 : Demarrage + Temps de lancement + Screenshot"
         shell: pwsh
         run: |
-          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          & $csc /target:library /out:win32helper.dll win32helper.cs 2>&1
-          if (-not (Test-Path "win32helper.dll")) {
-            Write-Error "FAIL - compilation helper"; exit 1
+          # Charger le helper EnumWindows + BitBlt pour capture par handle
+          $code1 = 'using System; using System.Runtime.InteropServices; using System.Drawing;'
+          $code2 = 'public class Win32Capture {'
+          $code3 = '  public delegate bool EnumWndProc(IntPtr h, IntPtr l);'
+          $code4 = '  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWndProc c, IntPtr l);'
+          $code5 = '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'
+          $code6 = '  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);'
+          $code7 = '  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);'
+          $code8 = '  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);'
+          $code9 = '  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);'
+          $codeA = '  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);'
+          $codeB = '  [DllImport("gdi32.dll")]  public static extern bool BitBlt(IntPtr d,int dx,int dy,int w,int h,IntPtr s,int sx,int sy,uint op);'
+          $codeC = '  public static IntPtr FindWindowForPid(int pid) {'
+          $codeD = '    IntPtr found = IntPtr.Zero;'
+          $codeE = '    EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p);'
+          $codeF = '      if((int)p==pid && GetWindowTextLength(h)>0){found=h;return false;} return true;},IntPtr.Zero);'
+          $codeG = '    return found;}'
+          $codeH = '  public static bool HasWindowForPid(int pid){return FindWindowForPid(pid)!=IntPtr.Zero;}'
+          $codeI = '}'
+          $codeJ = '[StructLayout(LayoutKind.Sequential)] public struct RECT{public int L,T,R,B;}'
+          Set-Content -Path "win32capture.cs" -Value @($code1,$code2,$code3,$code4,$code5,$code6,$code7,$code8,$code9,$codeA,$codeB,$codeC,$codeD,$codeE,$codeF,$codeG,$codeH,$codeI,$codeJ) -Encoding UTF8
+
+          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework644.0.30319\csc.exe"
+          & $csc /target:library /out:win32capture.dll /r:System.Drawing.dll win32capture.cs 2>&1
+          if (-not (Test-Path "win32capture.dll")) {
+            Write-Error "Compilation win32capture.dll echouee"; exit 1
           }
-          Write-Host "win32helper.dll OK"
+          Add-Type -Path "win32capture.dll"
 
-      - name: "TEST 4 : Demarrage + Temps de lancement"
-        shell: pwsh
-        run: |
-          Add-Type -Path "win32helper.dll"
+          # Lancer l exe
           $exePath = $env:EXE_PATH
           $workDir = Split-Path $exePath
-
           $psi = New-Object System.Diagnostics.ProcessStartInfo
           $psi.FileName         = $exePath
           $psi.WorkingDirectory = $workDir
@@ -213,6 +218,7 @@ jobs:
           $proc   = [System.Diagnostics.Process]::Start($psi)
           Write-Host "PID $($proc.Id) - attente fenetre..."
 
+          $hwnd    = [IntPtr]::Zero
           $launched = $false
           $timeout  = 15
           while ($chrono.Elapsed.TotalSeconds -lt $timeout) {
@@ -220,9 +226,8 @@ jobs:
             if ($proc.HasExited) {
               Write-Error "FAIL - crash (exit code $($proc.ExitCode))"; exit 1
             }
-            if ([Win32Helper]::HasWindowForPid($proc.Id)) {
-              $launched = $true; break
-            }
+            $hwnd = [Win32Capture]::FindWindowForPid($proc.Id)
+            if ($hwnd -ne [IntPtr]::Zero) { $launched = $true; break }
             Start-Sleep -Milliseconds 50
           }
           $chrono.Stop()
@@ -234,26 +239,39 @@ jobs:
             Write-Error "FAIL - fenetre non apparue apres ${timeout}s"; exit 1
           }
 
-          Write-Host "============================================"
-          Write-Host "Temps de lancement C++ : ${s} s (${ms} ms)"
+          Write-Host "Temps de lancement : ${s} s (${ms} ms)"
           if     ($s -lt 0.5) { Write-Host "Instantane (< 500ms)" }
           elseif ($s -lt 1)   { Write-Host "Excellent (< 1s)"     }
           elseif ($s -lt 2)   { Write-Host "Bon (< 2s)"           }
           else                 { Write-Host "Acceptable (>= 2s)"   }
-          Write-Host "============================================"
           echo "LAUNCH_MS=$ms" >> $env:GITHUB_ENV
           echo "LAUNCH_S=$s"   >> $env:GITHUB_ENV
 
-          Start-Sleep -Milliseconds 500
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+          # Attendre le rendu Qt
+          Start-Sleep -Milliseconds 1000
+
+          # Capture via PrintWindow (fonctionne en headless, capture le contenu rendu)
+          Add-Type -AssemblyName System.Drawing
+          $rect = New-Object RECT
+          [Win32Capture]::GetWindowRect($hwnd, [ref]$rect)
+          $w = $rect.R - $rect.L
+          $h = $rect.B - $rect.T
+          Write-Host "Fenetre: ${w}x${h} px a ($($rect.L),$($rect.T))"
+
+          $bmp = New-Object System.Drawing.Bitmap([Math]::Max($w,1), [Math]::Max($h,1))
           $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-          $gfx.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-          $bmp.Save("test_dir\screenshot.png")
+          $hdc = $gfx.GetHdc()
+
+          # PrintWindow capture le contenu meme si la fenetre est hors ecran
+          [Win32Capture]::PrintWindow($hwnd, $hdc, 2) | Out-Null
+
+          $gfx.ReleaseHdc($hdc)
+          $bmp.Save("test_dir\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
           $gfx.Dispose(); $bmp.Dispose()
+
+          $sz = [math]::Round((Get-Item "test_dir\screenshot.png").Length / 1KB)
+          Write-Host "PASS - screenshot capture via PrintWindow (${sz} Ko, ${w}x${h})"
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          Write-Host "PASS - screenshot capture"
 
       - name: Upload screenshot
         if: always()
