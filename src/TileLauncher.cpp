@@ -191,7 +191,7 @@ QPixmap TileButton::buildPixmap(int w, int h)
     p.setPen(Qt::white);
     QFont f(m_fontFamily, qMax(18, qMin(w, h) / 3), QFont::Bold);
     p.setFont(f);
-    QString initial = m_data.label.isEmpty() ? "?" : m_data.label.at(0).toUpper();
+    QString initial = m_data.label.isEmpty() ? QStringLiteral("?") : QString(m_data.label.at(0).toUpper());
     p.drawText(QRect(0, 0, w, h), Qt::AlignCenter, initial);
     return pix;
 }
@@ -265,7 +265,6 @@ QString TileLauncher::statsPath()
 TileLauncher::AppConfig TileLauncher::loadAppConfig(const QString& path)
 {
     QSettings s(path, QSettings::IniFormat);
-    s.setIniCodec("UTF-8");
     AppConfig cfg;
     cfg.title = s.value("App/title", "TileLauncher").toString();
     return cfg;
@@ -274,7 +273,6 @@ TileLauncher::AppConfig TileLauncher::loadAppConfig(const QString& path)
 QList<TileData> TileLauncher::loadTiles(const QString& path)
 {
     QSettings s(path, QSettings::IniFormat);
-    s.setIniCodec("UTF-8");
     QList<TileData> tiles;
     for (int i = 1; i <= NUM_TILES; ++i) {
         s.beginGroup(QString("Tile%1").arg(i));

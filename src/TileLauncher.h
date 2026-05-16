@@ -112,10 +112,12 @@ private:
     QPoint              m_dragPos;
     bool                m_dragging    = false;
 
-    static AppConfig      loadAppConfig(const QString& iniPath);
-    static QList<TileData> loadTiles(const QString& iniPath);
-    static QString        loadFont();
+    // Chemins fichiers — publics pour accès depuis TileButton
     static QString        iniPath();
     static QString        logPath();
     static QString        statsPath();
+
+    static AppConfig       loadAppConfig(const QString& iniPath);
+    static QList<TileData> loadTiles(const QString& iniPath);
+    static QString         loadFont();
 };
