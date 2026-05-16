@@ -20,29 +20,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # ── Qt6 via aqtinstall ─────────────────────────────────────────────
+      # ── Qt6 MSVC 2022 x64 ─────────────────────────────────────────────
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
         with:
-          version:      '6.8.3'
-          host:         'windows'
-          target:       'desktop'
-          arch:         'win64_msvc2022_64'
-          modules:      ''
-          cache:        true
+          version:   '6.8.3'
+          host:      'windows'
+          target:    'desktop'
+          arch:      'win64_msvc2022_64'
+          modules:   ''
+          cache:     true
 
-      # ── CMake + Ninja ──────────────────────────────────────────────────
-      - name: Configure CMake
+      # ── Configuration MSVC via Developer Command Prompt ────────────────
+      - name: Configure CMake (MSVC)
+        shell: cmd
         run: |
-          cmake -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
-        shell: pwsh
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -B build -G "Ninja" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_C_COMPILER=cl ^
+            -DCMAKE_CXX_COMPILER=cl ^
+            -DCMAKE_PREFIX_PATH="%Qt6_DIR%"
 
-      # ── Compilation ───────────────────────────────────────────────────
+      # ── Compilation MSVC ───────────────────────────────────────────────
       - name: Build
-        run: cmake --build build --config Release --parallel
-        shell: pwsh
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake --build build --config Release --parallel
 
       # ── Vérification ──────────────────────────────────────────────────
       - name: Verify build
@@ -54,24 +59,21 @@ jobs:
           Write-Host "TileLauncher.exe : $mb Mo"
           dir build\ | Where-Object { $_.Extension -in ".exe",".dll" }
 
-      # ── Copie tiles.ini dans le dossier build ─────────────────────────
+      # ── Copie tiles.ini ───────────────────────────────────────────────
       - name: Copy config
-        run: Copy-Item "tiles.ini" "build\tiles.ini" -Force
         shell: pwsh
+        run: Copy-Item "tiles.ini" "build\tiles.ini" -Force
 
       # ── Packaging ZIP ─────────────────────────────────────────────────
       - name: Package ZIP
         shell: pwsh
         run: |
-          # Créer un dossier de déploiement propre
           New-Item -ItemType Directory -Force -Path deploy | Out-Null
 
-          # Copier exe + DLL Qt déployées
           Get-ChildItem "build\" -Include "*.exe","*.dll" -Recurse |
             Copy-Item -Destination "deploy\" -Force
           Copy-Item "build\tiles.ini" "deploy\tiles.ini" -Force
 
-          # Copier les plugins Qt (platforms, styles...)
           foreach ($plug in @("platforms","styles","imageformats")) {
             $src = "build\$plug"
             if (Test-Path $src) {
@@ -82,8 +84,8 @@ jobs:
           Compress-Archive -Path "deploy\*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
 
-          $exeMB  = [math]::Round((Get-Item "deploy\TileLauncher.exe").Length / 1MB, 2)
-          $zipMB  = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length / 1MB, 1)
+          $exeMB = [math]::Round((Get-Item "deploy\TileLauncher.exe").Length / 1MB, 2)
+          $zipMB = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length / 1MB, 1)
           Write-Host "exe: $exeMB Mo  zip: $zipMB Mo"
           echo "EXE_MB=$exeMB" >> $env:GITHUB_ENV
           echo "ZIP_MB=$zipMB" >> $env:GITHUB_ENV
