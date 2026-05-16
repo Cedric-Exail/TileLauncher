@@ -161,7 +161,12 @@ QPixmap TileButton::extractExeIcon(const QString& exePath, int w, int h)
 
 QPixmap TileButton::buildPixmap(int w, int h)
 {
-    // 1. Icône explicite
+    // ── Priorité :
+    // 1. Image definie dans le .ini (icon=)
+    // 2. Icone native de l exe (ExtractIconEx)
+    // 3. Initiale du label sur fond noir
+
+    // 1. Image definie dans le .ini
     if (!m_data.icon.isEmpty()) {
         QString path = m_data.icon;
         if (!QFileInfo(path).isAbsolute())
@@ -172,26 +177,24 @@ QPixmap TileButton::buildPixmap(int w, int h)
         }
     }
 
-    // 2. Icône extraite de l'exe
+    // 2. Icone native de l exe
     if (!m_data.command.isEmpty()) {
         QString exe = m_data.command.trimmed().remove('"');
         QPixmap pix = extractExeIcon(exe, w, h);
         if (!pix.isNull()) return pix;
     }
 
-    // 3. Fallback : dégradé + initiale
+    // 3. Fallback : initiale sur fond noir
     QPixmap pix(w, h);
-    pix.fill(Qt::transparent);
+    pix.fill(Qt::black);
     QPainter p(&pix);
     p.setRenderHint(QPainter::Antialiasing);
-    QLinearGradient grad(0, 0, w, h);
-    grad.setColorAt(0, QColor(ACCENT));
-    grad.setColorAt(1, QColor(ACCENT2));
-    p.fillRect(0, 0, w, h, grad);
-    p.setPen(Qt::white);
+    p.setPen(QColor(ACCENT));
     QFont f(m_fontFamily, qMax(18, qMin(w, h) / 3), QFont::Bold);
     p.setFont(f);
-    QString initial = m_data.label.isEmpty() ? QStringLiteral("?") : QString(m_data.label.at(0).toUpper());
+    QString initial = m_data.label.isEmpty()
+        ? QStringLiteral("?")
+        : QString(m_data.label.at(0).toUpper());
     p.drawText(QRect(0, 0, w, h), Qt::AlignCenter, initial);
     return pix;
 }
