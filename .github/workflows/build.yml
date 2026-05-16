@@ -12,6 +12,7 @@ permissions:
   contents: write
 
 jobs:
+
   # ════════════════════════════════════════════════════════════════════════
   build:
     runs-on: windows-2025-vs2026
@@ -20,34 +21,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # ── Recherche MSVC via vswhere ─────────────────────────────────────
+      # ── Trouver vcvars64.bat via vswhere ───────────────────────────────
       - name: Find MSVC
         shell: pwsh
         run: |
           $vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
-          $vsPath = & $vswhere -latest -products * -property installationPath 2>$null
-          $vcvars = "$vsPath/VC/Auxiliary/Build/vcvars64.bat"
+          $vsPath  = & $vswhere -latest -products * -property installationPath 2>$null
+          $vcvars  = "$vsPath/VC/Auxiliary/Build/vcvars64.bat"
           if (-not (Test-Path $vcvars)) {
-            Write-Error "vcvars64.bat introuvable dans $vsPath"; exit 1
+            Write-Error "vcvars64.bat introuvable dans : $vsPath"
+            exit 1
           }
+          Write-Host "VCVARS = $vcvars"
           echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
-          Write-Host "VCVARS=$vcvars"
 
-      # ── Qt6 MSVC pre-compile via aqt ──────────────────────────────────
-      - name: Install Qt6 (aqt)
+      # ── Qt6 pré-compilé MSVC 2022 x64 via aqtinstall ──────────────────
+      - name: Install Qt6
         shell: pwsh
         run: |
           pip install aqtinstall --quiet
           aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 `
-            --outputdir C:/Qt `
-            --archives qtbase
-          $qt6cfg = "C:/Qt/6.8.3/msvc2022_64/lib/cmake/Qt6/Qt6Config.cmake"
-          if (Test-Path $qt6cfg) { Write-Host "Qt6Config.cmake OK" }
-          else { Write-Error "Qt6Config.cmake introuvable"; exit 1 }
+            --outputdir C:/Qt --archives qtbase
+          $cfg = "C:/Qt/6.8.3/msvc2022_64/lib/cmake/Qt6/Qt6Config.cmake"
+          if (-not (Test-Path $cfg)) {
+            Write-Error "Qt6Config.cmake introuvable"
+            exit 1
+          }
+          Write-Host "Qt6 OK : $cfg"
           echo "QT_DIR=C:/Qt/6.8.3/msvc2022_64" >> $env:GITHUB_ENV
 
       # ── Configure CMake ────────────────────────────────────────────────
-      - name: Configure CMake (MSVC)
+      - name: Configure CMake
         shell: cmd
         run: |
           call "%VCVARS%"
@@ -57,6 +61,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=cl ^
             -DCMAKE_PREFIX_PATH="%QT_DIR%"
           if errorlevel 1 (
+            echo --- CMakeError.log ---
             type build\CMakeFiles\CMakeError.log 2>nul
             exit /b 1
           )
@@ -69,36 +74,26 @@ jobs:
           cmake --build build --config Release --parallel
           if errorlevel 1 exit /b 1
 
-
-      # ── Vérification ──────────────────────────────────────────────────
-      - name: Verify build
+      # ── Trouver l exe et le stocker ────────────────────────────────────
+      - name: Verify exe
         shell: pwsh
         run: |
-          # Chercher l exe dans tout le dossier build
-          Write-Host "=== Contenu de build/ ==="
+          Write-Host "=== Contenu build/ ==="
           Get-ChildItem "build" -Recurse -Include "*.exe","*.dll" |
-            Select-Object FullName, @{N="Mo";E={[math]::Round($_.Length/1MB,2)}}
-
+            Select-Object FullName,@{N="Mo";E={[math]::Round($_.Length/1MB,2)}}
           $exe = Get-ChildItem "build" -Recurse -Filter "TileLauncher.exe" |
             Select-Object -First 1
           if (-not $exe) { Write-Error "Exe introuvable"; exit 1 }
-
-          $mb = [math]::Round($exe.Length / 1MB, 2)
-          Write-Host "FOUND: $($exe.FullName) ($mb Mo)"
+          Write-Host "EXE : $($exe.FullName) ($([math]::Round($exe.Length/1MB,2)) Mo)"
           echo "EXE_FULL=$($exe.FullName)" >> $env:GITHUB_ENV
-
-      # ── Copie tiles.ini ───────────────────────────────────────────────
-      - name: Copy config
-        shell: pwsh
-        run: Copy-Item "tiles.ini" "build\tiles.ini" -Force
 
       # ── Packaging ZIP ─────────────────────────────────────────────────
       - name: Package ZIP
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path deploy | Out-Null
-          # Copier exe + DLL Qt deployees par windeployqt (POST_BUILD)
           $exeDir = Split-Path $env:EXE_FULL
+          # Exe + DLL Qt (déployées par windeployqt via CMake POST_BUILD)
           Get-ChildItem $exeDir -Include "*.exe","*.dll" -Recurse |
             Copy-Item -Destination "deploy/" -Force
           foreach ($plug in @("platforms","styles","imageformats")) {
@@ -106,17 +101,15 @@ jobs:
             if (Test-Path $src) { Copy-Item $src "deploy/" -Recurse -Force }
           }
           Copy-Item "tiles.ini" "deploy/tiles.ini" -Force
-
-          Compress-Archive -Path "deploy\*" `
+          Compress-Archive -Path "deploy/*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
-
-          $exeMB = [math]::Round((Get-Item "deploy\TileLauncher.exe").Length / 1MB, 2)
-          $zipMB = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length / 1MB, 1)
-          Write-Host "exe standalone: $exeMB Mo  zip: $zipMB Mo"
+          $exeMB = [math]::Round((Get-Item "deploy/TileLauncher.exe").Length/1MB,2)
+          $zipMB = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length/1MB,1)
+          Write-Host "exe: $exeMB Mo  zip: $zipMB Mo"
           echo "EXE_MB=$exeMB" >> $env:GITHUB_ENV
           echo "ZIP_MB=$zipMB" >> $env:GITHUB_ENV
 
-      # ── Upload artifact ───────────────────────────────────────────────
+      # ── Upload artifact ────────────────────────────────────────────────
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
@@ -124,7 +117,6 @@ jobs:
           path: TileLauncher_Cpp_Win11_x64.zip
           retention-days: 30
 
-      # ── Résumé ────────────────────────────────────────────────────────
       - name: Build summary
         shell: pwsh
         run: |
@@ -132,7 +124,7 @@ jobs:
           echo "| Fichier | Taille |" >> $env:GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $env:GITHUB_STEP_SUMMARY
           echo "| TileLauncher.exe | $env:EXE_MB Mo |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| TileLauncher_Cpp_Win11_x64.zip | $env:ZIP_MB Mo |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| ZIP | $env:ZIP_MB Mo |" >> $env:GITHUB_STEP_SUMMARY
 
   # ════════════════════════════════════════════════════════════════════════
   test:
@@ -149,17 +141,17 @@ jobs:
       - name: Extract ZIP
         shell: pwsh
         run: |
-          Expand-Archive -Path "test_dir\TileLauncher_Cpp_Win11_x64.zip" `
+          Expand-Archive "test_dir/TileLauncher_Cpp_Win11_x64.zip" `
             -DestinationPath "test_dir" -Force
-          dir test_dir\
+          dir test_dir
 
-      - name: "TEST 1 : Existence et taille"
+      - name: "TEST 1 : Exe present et taille correcte"
         shell: pwsh
         run: |
           $exe = Get-ChildItem "test_dir" -Filter "TileLauncher.exe" -Recurse |
             Select-Object -First 1
           if (-not $exe) { Write-Error "FAIL - exe introuvable"; exit 1 }
-          $mb = [math]::Round($exe.Length / 1MB, 2)
+          $mb = [math]::Round($exe.Length/1MB,2)
           Write-Host "PASS - $($exe.FullName) ($mb Mo)"
           echo "EXE_PATH=$($exe.FullName)" >> $env:GITHUB_ENV
 
@@ -171,106 +163,95 @@ jobs:
           if (-not $ini) { Write-Error "FAIL - tiles.ini introuvable"; exit 1 }
           Write-Host "PASS - $($ini.FullName)"
 
-      - name: "TEST 3 : Helper Win32 compile dans TEST 4 - skip"
-        shell: pwsh
-        run: Write-Host "Helper compile directement dans TEST 4"
-
-      - name: "TEST 4 : Demarrage + Temps de lancement + Screenshot"
+      - name: "TEST 3 : Demarrage + Temps de lancement + Screenshot"
         shell: pwsh
         run: |
-          # Charger le helper EnumWindows + BitBlt pour capture par handle
-          $code1 = 'using System; using System.Runtime.InteropServices; using System.Drawing;'
-          $code2 = 'public class Win32Capture {'
-          $code3 = '  public delegate bool EnumWndProc(IntPtr h, IntPtr l);'
-          $code4 = '  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWndProc c, IntPtr l);'
-          $code5 = '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'
-          $code6 = '  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);'
-          $code7 = '  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);'
-          $code8 = '  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);'
-          $code9 = '  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);'
-          $codeA = '  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);'
-          $codeB = '  [DllImport("gdi32.dll")]  public static extern bool BitBlt(IntPtr d,int dx,int dy,int w,int h,IntPtr s,int sx,int sy,uint op);'
-          $codeC = '  public static IntPtr FindWindowForPid(int pid) {'
-          $codeD = '    IntPtr found = IntPtr.Zero;'
-          $codeE = '    EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p);'
-          $codeF = '      if((int)p==pid && GetWindowTextLength(h)>0){found=h;return false;} return true;},IntPtr.Zero);'
-          $codeG = '    return found;}'
-          $codeH = '  public static bool HasWindowForPid(int pid){return FindWindowForPid(pid)!=IntPtr.Zero;}'
-          $codeI = '}'
-          $codeJ = '[StructLayout(LayoutKind.Sequential)] public struct RECT{public int L,T,R,B;}'
-          Set-Content -Path "win32capture.cs" -Value @($code1,$code2,$code3,$code4,$code5,$code6,$code7,$code8,$code9,$codeA,$codeB,$codeC,$codeD,$codeE,$codeF,$codeG,$codeH,$codeI,$codeJ) -Encoding UTF8
+          # ── Compilation du helper Win32 (EnumWindows + PrintWindow) ──────
+          $cs  = @()
+          $cs += 'using System; using System.Runtime.InteropServices; using System.Drawing;'
+          $cs += '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }'
+          $cs += 'public class W32 {'
+          $cs += '  public delegate bool EWP(IntPtr h, IntPtr l);'
+          $cs += '  [DllImport("user32.dll")] public static extern bool EnumWindows(EWP c, IntPtr l);'
+          $cs += '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'
+          $cs += '  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);'
+          $cs += '  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);'
+          $cs += '  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);'
+          $cs += '  public static IntPtr FindWnd(int pid) {'
+          $cs += '    IntPtr f = IntPtr.Zero;'
+          $cs += '    EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p);'
+          $cs += '      if((int)p==pid && GetWindowTextLength(h)>0){f=h;return false;}'
+          $cs += '      return true;}, IntPtr.Zero);'
+          $cs += '    return f;'
+          $cs += '  }'
+          $cs += '}'
+          Set-Content "w32.cs" -Value $cs -Encoding UTF8
 
-          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework644.0.30319\csc.exe"
-          & $csc /target:library /out:win32capture.dll /r:System.Drawing.dll win32capture.cs 2>&1
-          if (-not (Test-Path "win32capture.dll")) {
-            Write-Error "Compilation win32capture.dll echouee"; exit 1
-          }
-          Add-Type -Path "win32capture.dll"
+          $csc = [IO.Path]::Combine($env:WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe")
+          & $csc /target:library /out:w32.dll /r:System.Drawing.dll w32.cs 2>&1
+          if (-not (Test-Path "w32.dll")) { Write-Error "Compilation w32.dll echouee"; exit 1 }
+          Add-Type -Path "w32.dll"
+          Write-Host "Helper W32 OK"
 
-          # Lancer l exe
-          $exePath = $env:EXE_PATH
-          $workDir = Split-Path $exePath
+          # ── Lancer l exe ──────────────────────────────────────────────────
           $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName         = $exePath
-          $psi.WorkingDirectory = $workDir
+          $psi.FileName         = $env:EXE_PATH
+          $psi.WorkingDirectory = Split-Path $env:EXE_PATH
           $psi.UseShellExecute  = $true
           $chrono = [System.Diagnostics.Stopwatch]::StartNew()
           $proc   = [System.Diagnostics.Process]::Start($psi)
           Write-Host "PID $($proc.Id) - attente fenetre..."
 
+          # ── Attente fenetre ───────────────────────────────────────────────
           $hwnd    = [IntPtr]::Zero
-          $launched = $false
-          $timeout  = 15
+          $timeout = 15
           while ($chrono.Elapsed.TotalSeconds -lt $timeout) {
             $proc.Refresh()
             if ($proc.HasExited) {
               Write-Error "FAIL - crash (exit code $($proc.ExitCode))"; exit 1
             }
-            $hwnd = [Win32Capture]::FindWindowForPid($proc.Id)
-            if ($hwnd -ne [IntPtr]::Zero) { $launched = $true; break }
+            $hwnd = [W32]::FindWnd($proc.Id)
+            if ($hwnd -ne [IntPtr]::Zero) { break }
             Start-Sleep -Milliseconds 50
           }
           $chrono.Stop()
 
-          $ms = [math]::Round($chrono.Elapsed.TotalMilliseconds)
-          $s  = [math]::Round($chrono.Elapsed.TotalSeconds, 2)
-
-          if (-not $launched) {
+          if ($hwnd -eq [IntPtr]::Zero) {
             Write-Error "FAIL - fenetre non apparue apres ${timeout}s"; exit 1
           }
 
+          $ms = [math]::Round($chrono.Elapsed.TotalMilliseconds)
+          $s  = [math]::Round($chrono.Elapsed.TotalSeconds, 2)
+          Write-Host "============================================"
           Write-Host "Temps de lancement : ${s} s (${ms} ms)"
           if     ($s -lt 0.5) { Write-Host "Instantane (< 500ms)" }
-          elseif ($s -lt 1)   { Write-Host "Excellent (< 1s)"     }
-          elseif ($s -lt 2)   { Write-Host "Bon (< 2s)"           }
+          elseif ($s -lt 1)   { Write-Host "Excellent  (< 1s)"    }
+          elseif ($s -lt 2)   { Write-Host "Bon        (< 2s)"    }
           else                 { Write-Host "Acceptable (>= 2s)"   }
+          Write-Host "============================================"
           echo "LAUNCH_MS=$ms" >> $env:GITHUB_ENV
           echo "LAUNCH_S=$s"   >> $env:GITHUB_ENV
 
-          # Attendre le rendu Qt
+          # ── Screenshot via PrintWindow ────────────────────────────────────
           Start-Sleep -Milliseconds 1000
 
-          # Capture via PrintWindow (fonctionne en headless, capture le contenu rendu)
-          Add-Type -AssemblyName System.Drawing
           $rect = New-Object RECT
-          [Win32Capture]::GetWindowRect($hwnd, [ref]$rect)
-          $w = $rect.R - $rect.L
-          $h = $rect.B - $rect.T
-          Write-Host "Fenetre: ${w}x${h} px a ($($rect.L),$($rect.T))"
+          [W32]::GetWindowRect($hwnd, [ref]$rect)
+          $w = [Math]::Max($rect.R - $rect.L, 1)
+          $h = [Math]::Max($rect.B - $rect.T, 1)
+          Write-Host "Fenetre : ${w}x${h} px"
 
-          $bmp = New-Object System.Drawing.Bitmap([Math]::Max($w,1), [Math]::Max($h,1))
+          Add-Type -AssemblyName System.Drawing
+          $bmp = New-Object System.Drawing.Bitmap($w, $h)
           $gfx = [System.Drawing.Graphics]::FromImage($bmp)
           $hdc = $gfx.GetHdc()
-
-          # PrintWindow capture le contenu meme si la fenetre est hors ecran
-          [Win32Capture]::PrintWindow($hwnd, $hdc, 2) | Out-Null
-
+          [W32]::PrintWindow($hwnd, $hdc, 2) | Out-Null
           $gfx.ReleaseHdc($hdc)
-          $bmp.Save("test_dir\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          $bmp.Save("test_dir/screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
           $gfx.Dispose(); $bmp.Dispose()
 
-          $sz = [math]::Round((Get-Item "test_dir\screenshot.png").Length / 1KB)
-          Write-Host "PASS - screenshot capture via PrintWindow (${sz} Ko, ${w}x${h})"
+          $sz = [math]::Round((Get-Item "test_dir/screenshot.png").Length/1KB)
+          Write-Host "PASS - screenshot PrintWindow OK (${sz} Ko, ${w}x${h})"
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
       - name: Upload screenshot
@@ -278,7 +259,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: test-screenshot-cpp
-          path: test_dir\screenshot.png
+          path: test_dir/screenshot.png
           retention-days: 7
 
       - name: Test summary
@@ -299,11 +280,10 @@ jobs:
           echo "|------|----------|" >> $env:GITHUB_STEP_SUMMARY
           echo "| 1 - Exe present | OK |" >> $env:GITHUB_STEP_SUMMARY
           echo "| 2 - tiles.ini present | OK |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 3 - Demarrage sans crash | OK |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| 4 - Temps lancement + Screenshot | OK |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| 3 - Demarrage + lancement + screenshot | OK |" >> $env:GITHUB_STEP_SUMMARY
           echo "" >> $env:GITHUB_STEP_SUMMARY
-          echo "## Performance C++ vs Python" >> $env:GITHUB_STEP_SUMMARY
-          echo "| | C++ natif | Python PyInstaller |" >> $env:GITHUB_STEP_SUMMARY
+          echo "## Performance" >> $env:GITHUB_STEP_SUMMARY
+          echo "| | C++ natif | Python |" >> $env:GITHUB_STEP_SUMMARY
           echo "|--|--|--|" >> $env:GITHUB_STEP_SUMMARY
           echo "| Temps fenetre visible | **${s} s** (${ms} ms) | ~1.8 s |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Appreciation | $perf | Excellent (< 2s) |" >> $env:GITHUB_STEP_SUMMARY
@@ -326,15 +306,15 @@ jobs:
           tag_name: cpp-v1.0.${{ github.run_number }}
           name: "TileLauncher C++ v1.0.${{ github.run_number }} — Windows 11 x64"
           body: |
-            ## TileLauncher C++ — Standalone Windows 11 x64
+            ## TileLauncher C++ — Windows 11 x64
 
             Application native Qt6/C++ — démarrage instantané.
 
             ### Installation
-            1. Extraire le ZIP
+            1. Extraire le ZIP dans un dossier
             2. Double-cliquer sur `TileLauncher.exe`
-            3. Éditer `tiles.ini` pour configurer vos 8 tuiles
-          files: dist\TileLauncher_Cpp_Win11_x64.zip
+            3. Editer `tiles.ini` pour configurer vos 8 tuiles
+          files: dist/TileLauncher_Cpp_Win11_x64.zip
           draft: false
           prerelease: false
         env:
