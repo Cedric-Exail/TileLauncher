@@ -140,23 +140,33 @@ jobs:
             Write-Warning "No runtime DLLs found - exe may require VC++ Redist on target"
           }
 
-          # Reorganiser : exe+ini a la racine, tout le reste dans _internal/
-          New-Item -ItemType Directory -Force -Path "release"          | Out-Null
-          New-Item -ItemType Directory -Force -Path "release/_internal" | Out-Null
-          New-Item -ItemType Directory -Force -Path "release/_internal/platforms"    | Out-Null
-          New-Item -ItemType Directory -Force -Path "release/_internal/styles"       | Out-Null
-          New-Item -ItemType Directory -Force -Path "release/_internal/imageformats" | Out-Null
 
-          # Exe principal a la racine
-          Copy-Item "deploy/TileLauncher.exe" "release/TileLauncher.exe" -Force
+          # ── Structure finale :
+          # racine/
+          #   TileLauncher.bat      <- lanceur (double-clic utilisateur)
+          #   tiles.ini             <- config
+          #   _internal/
+          #     TileLauncher.exe    <- exe reel
+          #     TileLauncher.dat    <- donnees persistantes
+          #     Qt6Core.dll, ...    <- DLL Qt + runtime
+          #     platforms/          <- plugins Qt
+          #     styles/
+          #     imageformats/
 
-          # Config a la racine
-          Copy-Item "tiles.ini" "release/tiles.ini" -Force
+          New-Item -ItemType Directory -Force -Path "release"                          | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal"               | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal/platforms"     | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal/styles"        | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal/imageformats"  | Out-Null
 
-          # .dat dans _internal
-          Copy-Item "TileLauncher.dat" "release/_internal/TileLauncher.dat" -Force
+          # Exe dans _internal
+          Copy-Item "deploy/TileLauncher.exe" "release/_internal/TileLauncher.exe" -Force
 
-          # Toutes les DLL Qt et runtime dans _internal
+          # Config et .dat dans _internal
+          Copy-Item "tiles.ini"        "release/_internal/tiles.ini"               -Force
+          Copy-Item "TileLauncher.dat" "release/_internal/TileLauncher.dat"        -Force
+
+          # DLL Qt + runtime dans _internal
           Get-ChildItem "deploy" -Filter "*.dll" |
             Copy-Item -Destination "release/_internal/" -Force
 
@@ -169,21 +179,28 @@ jobs:
             }
           }
 
+          # Launcher .bat a la racine
+          # Ajoute _internal au PATH puis lance l exe
+          $bat = "@echo off`r`n"
+          $bat += "cd /d `"%~dp0_internal`"`r`n"
+          $bat += "set PATH=%~dp0_internal;%PATH%`r`n"
+          $bat += "start `"`" `"%~dp0_internal\TileLauncher.exe`"`r`n"
+          Set-Content -Path "release/TileLauncher.bat" -Value $bat -Encoding ASCII -NoNewline
+
           # Lister la structure finale
           Write-Host "=== Structure release ==="
           Get-ChildItem "release" -Recurse |
-            Select-Object @{N="Path";E={$_.FullName.Replace((Resolve-Path "release").Path+"\","")}} |
-            ForEach-Object { Write-Host "  $($_.Path)" }
+            Select-Object @{N="P";E={$_.FullName.Replace((Resolve-Path "release").Path+"\","")}} |
+            ForEach-Object { Write-Host "  $($_.P)" }
           Write-Host "========================="
 
           Compress-Archive -Path "release/*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
-          $exeMB = [math]::Round((Get-Item "release/TileLauncher.exe").Length/1MB,2)
+          $exeMB = [math]::Round((Get-Item "release/_internal/TileLauncher.exe").Length/1MB,2)
           $zipMB = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length/1MB,1)
           Write-Host "exe: $exeMB Mo  zip: $zipMB Mo"
           echo "EXE_MB=$exeMB" >> $env:GITHUB_ENV
           echo "ZIP_MB=$zipMB" >> $env:GITHUB_ENV
-
       # ── Upload artifact ────────────────────────────────────────────────
       - name: Upload artifact
         uses: actions/upload-artifact@v6
