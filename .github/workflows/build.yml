@@ -100,7 +100,8 @@ jobs:
             $src = Join-Path $exeDir $plug
             if (Test-Path $src) { Copy-Item $src "deploy/" -Recurse -Force }
           }
-          Copy-Item "tiles.ini" "deploy/tiles.ini" -Force
+          Copy-Item "tiles.ini"         "deploy/tiles.ini"         -Force
+          Copy-Item "TileLauncher.dat" "deploy/TileLauncher.dat" -Force
           Compress-Archive -Path "deploy/*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
           $exeMB = [math]::Round((Get-Item "deploy/TileLauncher.exe").Length/1MB,2)
