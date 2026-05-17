@@ -93,18 +93,97 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path deploy | Out-Null
           $exeDir = Split-Path $env:EXE_FULL
-          # Exe + DLL Qt (déployées par windeployqt via CMake POST_BUILD)
+
+          # Exe + DLL Qt (deploiees par windeployqt via CMake POST_BUILD)
           Get-ChildItem $exeDir -Include "*.exe","*.dll" -Recurse |
             Copy-Item -Destination "deploy/" -Force
           foreach ($plug in @("platforms","styles","imageformats")) {
             $src = Join-Path $exeDir $plug
             if (Test-Path $src) { Copy-Item $src "deploy/" -Recurse -Force }
           }
-          Copy-Item "tiles.ini"         "deploy/tiles.ini"         -Force
-          Copy-Item "TileLauncher.dat" "deploy/TileLauncher.dat" -Force
-          Compress-Archive -Path "deploy/*" `
+
+          # DLL runtime MSVC manquantes (vcruntime, msvcp)
+          # windeployqt ne les copie pas toujours — on les cherche dans MSVC
+          $msvcPaths = @(
+            "$env:VCToolsRedistDird\Microsoft.VC143.CRT",
+            "$env:VCToolsRedistDird\Microsoft.VC144.CRT",
+            "C:/Program Files/Microsoft Visual Studio/18/Enterprise/VC/Redist/MSVC",
+            "C:/Windows/System32"
+          )
+          $runtimeDlls = @(
+            "vcruntime140.dll","vcruntime140_1.dll",
+            "msvcp140.dll","msvcp140_1.dll","msvcp140_2.dll",
+            "concrt140.dll"
+          )
+
+          # Chercher via vswhere le dossier Redist exact
+          $vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vsPath  = & $vswhere -latest -products * -property installationPath 2>$null
+          $redistDir = Join-Path $vsPath "VC/Redist/MSVC"
+          if (Test-Path $redistDir) {
+            $latest = Get-ChildItem $redistDir -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            $msvcPaths = @(Join-Path $latest.FullName "x64/Microsoft.VC143.CRT",
+                           Join-Path $latest.FullName "x64/Microsoft.VC144.CRT",
+                           Join-Path $latest.FullName "x64") + $msvcPaths
+            Write-Host "Redist path: $($latest.FullName)"
+          }
+
+          $copied = @()
+          foreach ($dll in $runtimeDlls) {
+            foreach ($dir in $msvcPaths) {
+              $src = Join-Path $dir $dll
+              if (Test-Path $src) {
+                Copy-Item $src "deploy/$dll" -Force
+                $copied += $dll
+                break
+              }
+            }
+          }
+          if ($copied.Count -gt 0) {
+            Write-Host "Runtime DLLs copied: $($copied -join ', ')"
+          } else {
+            Write-Warning "No runtime DLLs found - exe may require VC++ Redist on target"
+          }
+
+          # Reorganiser : exe+ini a la racine, tout le reste dans _internal/
+          New-Item -ItemType Directory -Force -Path "release"          | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal" | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal/platforms"    | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal/styles"       | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/_internal/imageformats" | Out-Null
+
+          # Exe principal a la racine
+          Copy-Item "deploy/TileLauncher.exe" "release/TileLauncher.exe" -Force
+
+          # Config a la racine
+          Copy-Item "tiles.ini" "release/tiles.ini" -Force
+
+          # .dat dans _internal
+          Copy-Item "TileLauncher.dat" "release/_internal/TileLauncher.dat" -Force
+
+          # Toutes les DLL Qt et runtime dans _internal
+          Get-ChildItem "deploy" -Filter "*.dll" |
+            Copy-Item -Destination "release/_internal/" -Force
+
+          # Plugins Qt dans leurs sous-dossiers de _internal
+          foreach ($plug in @("platforms","styles","imageformats")) {
+            $src = "deploy/$plug"
+            if (Test-Path $src) {
+              Get-ChildItem $src -Filter "*.dll" |
+                Copy-Item -Destination "release/_internal/$plug/" -Force
+            }
+          }
+
+          # Lister la structure finale
+          Write-Host "=== Structure release ==="
+          Get-ChildItem "release" -Recurse |
+            Select-Object @{N="Path";E={$_.FullName.Replace((Resolve-Path "release").Path+"\","")}} |
+            ForEach-Object { Write-Host "  $($_.Path)" }
+          Write-Host "========================="
+
+          Compress-Archive -Path "release/*" `
             -DestinationPath "TileLauncher_Cpp_Win11_x64.zip" -Force
-          $exeMB = [math]::Round((Get-Item "deploy/TileLauncher.exe").Length/1MB,2)
+          $exeMB = [math]::Round((Get-Item "release/TileLauncher.exe").Length/1MB,2)
           $zipMB = [math]::Round((Get-Item "TileLauncher_Cpp_Win11_x64.zip").Length/1MB,1)
           Write-Host "exe: $exeMB Mo  zip: $zipMB Mo"
           echo "EXE_MB=$exeMB" >> $env:GITHUB_ENV
