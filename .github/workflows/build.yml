@@ -122,7 +122,6 @@ jobs:
             $px64 = Join-Path $latest.FullName "x64"
             $msvcPaths = @($p143, $p144, $px64) + $msvcPaths
           }
-          }
 
           $copied = @()
           foreach ($dll in $runtimeDlls) {
