@@ -104,28 +104,24 @@ jobs:
 
           # DLL runtime MSVC manquantes (vcruntime, msvcp)
           # windeployqt ne les copie pas toujours — on les cherche dans MSVC
-          $msvcPaths = @(
-            "$env:VCToolsRedistDird\Microsoft.VC143.CRT",
-            "$env:VCToolsRedistDird\Microsoft.VC144.CRT",
-            "C:/Program Files/Microsoft Visual Studio/18/Enterprise/VC/Redist/MSVC",
-            "C:/Windows/System32"
-          )
           $runtimeDlls = @(
             "vcruntime140.dll","vcruntime140_1.dll",
             "msvcp140.dll","msvcp140_1.dll","msvcp140_2.dll",
             "concrt140.dll"
           )
-
-          # Chercher via vswhere le dossier Redist exact
-          $vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
-          $vsPath  = & $vswhere -latest -products * -property installationPath 2>$null
+          $msvcPaths = @("C:/Windows/System32")
+          $vswhere  = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vsPath   = & $vswhere -latest -products * -property installationPath 2>$null
           $redistDir = Join-Path $vsPath "VC/Redist/MSVC"
           if (Test-Path $redistDir) {
-            $latest = Get-ChildItem $redistDir -Directory | Sort-Object Name -Descending | Select-Object -First 1
-            $msvcPaths = @(Join-Path $latest.FullName "x64/Microsoft.VC143.CRT",
-                           Join-Path $latest.FullName "x64/Microsoft.VC144.CRT",
-                           Join-Path $latest.FullName "x64") + $msvcPaths
-            Write-Host "Redist path: $($latest.FullName)"
+            $latest = Get-ChildItem $redistDir -Directory |
+              Sort-Object Name -Descending | Select-Object -First 1
+            Write-Host "Redist: $($latest.FullName)"
+            $p143 = Join-Path $latest.FullName "x64/Microsoft.VC143.CRT"
+            $p144 = Join-Path $latest.FullName "x64/Microsoft.VC144.CRT"
+            $px64 = Join-Path $latest.FullName "x64"
+            $msvcPaths = @($p143, $p144, $px64) + $msvcPaths
+          }
           }
 
           $copied = @()
