@@ -19,10 +19,12 @@ set(SOURCES
     src/main.cpp
     src/TileLauncher.cpp
     src/Logger.cpp
+    src/AppData.cpp
 )
 set(HEADERS
     src/TileLauncher.h
     src/Logger.h
+    src/AppData.h
 )
 
 # ── Exécutable Windows sans console ──────────────────────────────────────────
