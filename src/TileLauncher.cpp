@@ -1,5 +1,6 @@
 #include "TileLauncher.h"
 #include "Logger.h"
+#include "AppData.h"
 
 #include <QApplication>
 #include <QScreen>
@@ -259,10 +260,10 @@ QString TileLauncher::logPath()
                .absoluteFilePath("TileLauncher.log");
 }
 
-QString TileLauncher::statsPath()
+QString TileLauncher::datPath()
 {
     return QDir(QCoreApplication::applicationDirPath())
-               .absoluteFilePath("TileLauncher.stats");
+               .absoluteFilePath("TileLauncher.dat");
 }
 
 TileLauncher::AppConfig TileLauncher::loadAppConfig(const QString& path)
@@ -316,7 +317,7 @@ TileLauncher::TileLauncher(QWidget* parent)
     : QWidget(parent)
 {
     // Logger — ouverture avant toute action
-    Logger::instance().open(logPath(), statsPath());
+    Logger::instance().open(logPath(), datPath());
     Logger::instance().logLaunch();
 
     m_fontFamily = loadFont();
@@ -446,7 +447,29 @@ void TileLauncher::populateGrid(const QList<TileData>& tiles)
 void TileLauncher::positionWindow()
 {
     QScreen* screen = QGuiApplication::primaryScreen();
-    QRect geo = screen->availableGeometry();
+    QRect    geo    = screen->availableGeometry();
+
+    const AppData& d = Logger::instance().data();
+    if (d.hasPosition()) {
+        // Vérifier que la position sauvée est toujours sur un écran valide
+        QPoint saved = d.position();
+        bool   onScreen = false;
+        for (QScreen* s : QGuiApplication::screens()) {
+            if (s->availableGeometry().contains(saved)) {
+                onScreen = true;
+                break;
+            }
+        }
+        if (onScreen) {
+            move(saved);
+            sendToBottom();
+            Logger::instance().log(Logger::INFO,
+                QString("Position restaurée : X=%1 Y=%2")
+                    .arg(saved.x()).arg(saved.y()));
+            return;
+        }
+    }
+    // Position par défaut : coin supérieur droit
     move(geo.right() - width(), geo.top());
     sendToBottom();
 }
@@ -462,7 +485,7 @@ void TileLauncher::sendToBottom()
 
 void TileLauncher::closeEvent(QCloseEvent* e)
 {
-    Logger::instance().logClose();
+    Logger::instance().logClose(pos());
     e->accept();
     QApplication::instance()->quit();
 }

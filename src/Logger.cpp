@@ -1,8 +1,5 @@
 #include "Logger.h"
-
-#include <QDir>
-#include <QCoreApplication>
-#include <QSettings>
+#include <QDateTime>
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
 Logger& Logger::instance()
@@ -12,14 +9,14 @@ Logger& Logger::instance()
 }
 
 // ── Ouverture ─────────────────────────────────────────────────────────────────
-void Logger::open(const QString& logPath, const QString& statsPath)
+void Logger::open(const QString& logPath, const QString& datPath)
 {
-    m_statsPath = statsPath;
+    m_datPath = datPath;
 
-    // Lire le compteur permanent existant
-    readStats();
+    // Charger le fichier .dat binaire (ou créer par défaut si absent/corrompu)
+    m_data = AppData::load(datPath);
 
-    // Ouvrir le fichier log en mode append
+    // Ouvrir le log texte en mode append
     m_logFile.setFileName(logPath);
     m_logFile.open(QIODevice::Append | QIODevice::Text);
     m_stream.setDevice(&m_logFile);
@@ -31,8 +28,7 @@ void Logger::open(const QString& logPath, const QString& statsPath)
 // ── Helpers ───────────────────────────────────────────────────────────────────
 QString Logger::timestamp() const
 {
-    return QDateTime::currentDateTime()
-               .toString("yyyy-MM-dd HH:mm:ss.zzz");
+    return QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
 }
 
 QString Logger::levelStr(Level l) const
@@ -46,7 +42,7 @@ QString Logger::levelStr(Level l) const
     return "INFO   ";
 }
 
-// ── Écriture générique ────────────────────────────────────────────────────────
+// ── Écriture ──────────────────────────────────────────────────────────────────
 void Logger::log(Level level, const QString& message)
 {
     if (!m_open) return;
@@ -57,95 +53,75 @@ void Logger::log(Level level, const QString& message)
     m_stream.flush();
 }
 
-// ── Événements applicatifs ────────────────────────────────────────────────────
+// ── Démarrage ─────────────────────────────────────────────────────────────────
 void Logger::logLaunch()
 {
     if (!m_open) return;
 
+    // Incrémenter le compteur de lancements et horodatage
+    m_data.launchCount++;
+    m_data.lastLaunch = QDateTime::currentSecsSinceEpoch();
+
+    // Démarrer le chrono de session
     m_sessionTimer.start();
 
-    // Séparateur visuel entre sessions
+    // Sauvegarder immédiatement (même si crash, on a le lancement enregistré)
+    m_data.save(m_datPath);
+
     m_stream << "\n";
     m_stream << "╔══════════════════════════════════════════════════════╗\n";
-    m_stream << QString("║  DÉMARRAGE  %1  ║\n")
-                    .arg(timestamp(), -40);
-    m_stream << QString("║  Temps total d'utilisation cumulé : %1  ║\n")
-                    .arg(formattedTotalUsage(), -18);
+    m_stream << QString("║  DÉMARRAGE  %1  ║\n").arg(timestamp(), -40);
+    m_stream << QString("║  Lancement n°%-6lld  Temps total : %-18s║\n")
+                    .arg(m_data.launchCount)
+                    .arg(m_data.formattedUsage());
+    if (m_data.hasPosition())
+        m_stream << QString("║  Dernière position : X=%-5d Y=%-5d                ║\n")
+                        .arg(m_data.windowX).arg(m_data.windowY);
     m_stream << "╚══════════════════════════════════════════════════════╝\n";
     m_stream.flush();
 
     log(INFO, "Application démarrée");
 }
 
-void Logger::logClose()
+// ── Fermeture ─────────────────────────────────────────────────────────────────
+void Logger::logClose(const QPoint& windowPos)
 {
     if (!m_open) return;
 
     // Durée de cette session
     qint64 sessionSec = m_sessionTimer.elapsed() / 1000;
-    m_totalSeconds   += sessionSec;
+    m_data.totalSecs += sessionSec;
 
-    // Sauvegarder le nouveau total
-    writeStats();
+    // Sauvegarder la position finale de la fenêtre
+    m_data.setPosition(windowPos);
 
-    int h  =  sessionSec / 3600;
-    int m  = (sessionSec % 3600) / 60;
-    int s  =  sessionSec % 60;
-    QString sessionStr = QString("%1h %2m %3s").arg(h).arg(m, 2, 10, QChar('0')).arg(s, 2, 10, QChar('0'));
+    // Persister le .dat
+    m_data.save(m_datPath);
+
+    int h =  sessionSec / 3600;
+    int m = (sessionSec % 3600) / 60;
+    int s =  sessionSec % 60;
+    QString sessionStr = QString("%1h %2m %3s")
+        .arg(h)
+        .arg(m, 2, 10, QChar('0'))
+        .arg(s, 2, 10, QChar('0'));
 
     log(INFO, QString("Session terminée — durée : %1").arg(sessionStr));
 
     m_stream << "╔══════════════════════════════════════════════════════╗\n";
-    m_stream << QString("║  FERMETURE  %1  ║\n")
-                    .arg(timestamp(), -40);
-    m_stream << QString("║  Durée session          : %1  ║\n")
-                    .arg(sessionStr, -26);
-    m_stream << QString("║  Temps total cumulé     : %1  ║\n")
-                    .arg(formattedTotalUsage(), -26);
+    m_stream << QString("║  FERMETURE  %1  ║\n").arg(timestamp(), -40);
+    m_stream << QString("║  Durée session      : %-30s║\n").arg(sessionStr);
+    m_stream << QString("║  Temps total cumulé : %-30s║\n").arg(m_data.formattedUsage());
+    m_stream << QString("║  Position sauvée    : X=%-5d Y=%-20d║\n")
+                    .arg(windowPos.x()).arg(windowPos.y());
     m_stream << "╚══════════════════════════════════════════════════════╝\n";
     m_stream.flush();
 
     m_logFile.close();
 }
 
+// ── Action tuile ──────────────────────────────────────────────────────────────
 void Logger::logTileAction(const QString& label, const QString& command)
 {
     log(ACTION, QString("Lancement tuile [%1] → %2").arg(label, command));
-}
-
-// ── Compteur permanent ────────────────────────────────────────────────────────
-void Logger::readStats()
-{
-    QSettings stats(m_statsPath, QSettings::IniFormat);
-    m_totalSeconds = stats.value("usage/total_seconds", 0).toLongLong();
-}
-
-void Logger::writeStats()
-{
-    QSettings stats(m_statsPath, QSettings::IniFormat);
-    stats.setValue("usage/total_seconds",  m_totalSeconds);
-    stats.setValue("usage/formatted",      formattedTotalUsage());
-    stats.setValue("usage/last_updated",
-                   QDateTime::currentDateTime().toString(Qt::ISODate));
-    stats.sync();
-}
-
-qint64 Logger::totalUsageSeconds() const
-{
-    return m_totalSeconds;
-}
-
-QString Logger::formattedTotalUsage() const
-{
-    qint64 total = m_totalSeconds;
-    int days  =  total / 86400;
-    int hours = (total % 86400) / 3600;
-    int mins  = (total % 3600)  / 60;
-    int secs  =  total % 60;
-
-    if (days > 0)
-        return QString("%1j %2h %3m %4s").arg(days).arg(hours).arg(mins, 2, 10, QChar('0')).arg(secs, 2, 10, QChar('0'));
-    if (hours > 0)
-        return QString("%1h %2m %3s").arg(hours).arg(mins, 2, 10, QChar('0')).arg(secs, 2, 10, QChar('0'));
-    return QString("%1m %2s").arg(mins).arg(secs, 2, 10, QChar('0'));
 }

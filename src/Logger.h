@@ -1,17 +1,14 @@
 #pragma once
 
+#include "AppData.h"
 #include <QString>
-#include <QDateTime>
 #include <QFile>
 #include <QTextStream>
 #include <QElapsedTimer>
 
 // ── Logger singleton ──────────────────────────────────────────────────────────
-// Écrit dans TileLauncher.log (même dossier que l'exe)
-// Format : [2025-05-14 10:23:45.123] [INFO] Message
-//
-// Compteur permanent de temps d'utilisation stocké dans TileLauncher.stats
-// (fichier texte, clé = total_seconds)
+// Journal texte  → TileLauncher.log  (append)
+// Données binaires → TileLauncher.dat (AppData, 64 octets, CRC32)
 
 class Logger
 {
@@ -20,19 +17,19 @@ public:
 
     static Logger& instance();
 
-    // Ouvrir le log (appel unique au démarrage)
-    void open(const QString& logPath, const QString& statsPath);
+    // Initialisation (une seule fois au démarrage)
+    void open(const QString& logPath, const QString& datPath);
 
-    // Écriture
+    // Journal
     void log(Level level, const QString& message);
-    void logLaunch();                               // Démarrage application
-    void logClose();                                // Fermeture + durée session
-    void logTileAction(const QString& label,
-                       const QString& command);     // Clic tuile
+    void logLaunch();
+    void logClose(const QPoint& windowPos);   // Sauvegarde aussi la position
+    void logTileAction(const QString& label, const QString& command);
 
-    // Compteur permanent
-    qint64 totalUsageSeconds() const;               // Temps cumulé toutes sessions
-    QString formattedTotalUsage() const;            // "12h 34m 56s"
+    // Accès aux données persistées
+    const AppData& data() const { return m_data; }
+    AppData&       data()       { return m_data; }
+    QString        formattedTotalUsage() const { return m_data.formattedUsage(); }
 
 private:
     Logger() = default;
@@ -40,15 +37,13 @@ private:
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
-    void writeStats();
-    void readStats();
     QString levelStr(Level l) const;
     QString timestamp() const;
 
-    QFile           m_logFile;
-    QTextStream     m_stream;
-    QElapsedTimer   m_sessionTimer;     // Chrono de la session courante
-    qint64          m_totalSeconds = 0; // Cumulé depuis la première utilisation
-    QString         m_statsPath;
-    bool            m_open = false;
+    QFile         m_logFile;
+    QTextStream   m_stream;
+    QElapsedTimer m_sessionTimer;
+    AppData       m_data;
+    QString       m_datPath;
+    bool          m_open = false;
 };

@@ -116,7 +116,7 @@ public:
     // Chemins fichiers — accessibles depuis TileButton
     static QString        iniPath();
     static QString        logPath();
-    static QString        statsPath();
+    static QString        datPath();
 
 private:
 
