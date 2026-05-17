@@ -23,7 +23,7 @@ public:
     // Journal
     void log(Level level, const QString& message);
     void logLaunch();
-    void logClose(const QPoint& windowPos);   // Sauvegarde aussi la position
+    void logClose(const QPoint& windowPos, const QSize& windowSize);
     void logTileAction(const QString& label, const QString& command);
 
     // Accès aux données persistées

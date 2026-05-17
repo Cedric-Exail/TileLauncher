@@ -1,5 +1,6 @@
 #include "Logger.h"
 #include <QDateTime>
+#include <QSize>
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
 Logger& Logger::instance()
@@ -70,25 +71,25 @@ void Logger::logLaunch()
 
     m_stream << "\n";
     m_stream << "╔══════════════════════════════════════════════════════╗\n";
-    m_stream << QString("║  DÉMARRAGE  %1  ║\n").arg(timestamp(), -40);
-    m_stream << QString("║  Lancement n°%-6lld  Temps total : %-18s║\n")
+    m_stream << QString("║  STARTUP    %1  ║\n").arg(timestamp(), -40);
+    m_stream << QString("║  Launch #%-8lld  Total usage : %-18s║\n")
                     .arg(m_data.launchCount)
                     .arg(m_data.formattedUsage());
     if (m_data.hasPosition())
-        m_stream << QString("║  Dernière position : X=%-5d Y=%-5d                ║\n")
+        m_stream << QString("║  Last position     : X=%-5d Y=%-5d                ║\n")
                         .arg(m_data.windowX).arg(m_data.windowY);
     m_stream << "╚══════════════════════════════════════════════════════╝\n";
     m_stream.flush();
 
-    log(INFO, "Application démarrée");
+    log(INFO, "Application started");
 }
 
 // ── Fermeture ─────────────────────────────────────────────────────────────────
-void Logger::logClose(const QPoint& windowPos)
+void Logger::logClose(const QPoint& windowPos, const QSize& windowSize)
 {
     if (!m_open) return;
 
-    // Durée de cette session
+    // Duration of this session
     qint64 sessionSec = m_sessionTimer.elapsed() / 1000;
     m_data.totalSecs += sessionSec;
 
@@ -106,14 +107,16 @@ void Logger::logClose(const QPoint& windowPos)
         .arg(m, 2, 10, QChar('0'))
         .arg(s, 2, 10, QChar('0'));
 
-    log(INFO, QString("Session terminée — durée : %1").arg(sessionStr));
+    log(INFO, QString("Session ended - duration: %1").arg(sessionStr));
 
     m_stream << "╔══════════════════════════════════════════════════════╗\n";
-    m_stream << QString("║  FERMETURE  %1  ║\n").arg(timestamp(), -40);
-    m_stream << QString("║  Durée session      : %-30s║\n").arg(sessionStr);
-    m_stream << QString("║  Temps total cumulé : %-30s║\n").arg(m_data.formattedUsage());
-    m_stream << QString("║  Position sauvée    : X=%-5d Y=%-20d║\n")
+    m_stream << QString("║  SHUTDOWN   %1  ║\n").arg(timestamp(), -40);
+    m_stream << QString("║  Session duration   : %-30s║\n").arg(sessionStr);
+    m_stream << QString("║  Total usage        : %-30s║\n").arg(m_data.formattedUsage());
+    m_stream << QString("║  Position saved     : X=%-5d Y=%-20d║\n")
                     .arg(windowPos.x()).arg(windowPos.y());
+    m_stream << QString("║  Size saved         : W=%-5d H=%-20d║\n")
+                    .arg(windowSize.width()).arg(windowSize.height());
     m_stream << "╚══════════════════════════════════════════════════════╝\n";
     m_stream.flush();
 
@@ -123,5 +126,5 @@ void Logger::logClose(const QPoint& windowPos)
 // ── Action tuile ──────────────────────────────────────────────────────────────
 void Logger::logTileAction(const QString& label, const QString& command)
 {
-    log(ACTION, QString("Lancement tuile [%1] → %2").arg(label, command));
+    log(ACTION, QString("Tile launch [%1] -> %2").arg(label, command));
 }

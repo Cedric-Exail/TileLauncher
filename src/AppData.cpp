@@ -1,5 +1,4 @@
 #include "AppData.h"
-
 #include <QFile>
 #include <QDateTime>
 #include <cstring>
@@ -18,21 +17,20 @@ uint32_t AppData::crc32(const uint8_t* data, int len)
 
 // ── Helpers little-endian ─────────────────────────────────────────────────────
 static void writeU32(uint8_t* p, uint32_t v) {
-    p[0]=v; p[1]=v>>8; p[2]=v>>16; p[3]=v>>24;
+    p[0]=uint8_t(v); p[1]=uint8_t(v>>8); p[2]=uint8_t(v>>16); p[3]=uint8_t(v>>24);
 }
-static void writeI32(uint8_t* p, int32_t v) { writeU32(p, static_cast<uint32_t>(v)); }
-static void writeI64(uint8_t* p, int64_t v) {
-    writeU32(p,   static_cast<uint32_t>(v));
-    writeU32(p+4, static_cast<uint32_t>(static_cast<uint64_t>(v) >> 32));
+static void writeI32(uint8_t* p, int32_t v)  { writeU32(p, uint32_t(v)); }
+static void writeI64(uint8_t* p, int64_t v)  {
+    writeU32(p,   uint32_t(uint64_t(v)));
+    writeU32(p+4, uint32_t(uint64_t(v) >> 32));
 }
 static uint32_t readU32(const uint8_t* p) {
-    return p[0] | (p[1]<<8) | (p[2]<<16) | (p[3]<<24);
+    return p[0]|(p[1]<<8)|(p[2]<<16)|(p[3]<<24);
 }
-static int32_t  readI32(const uint8_t* p) { return static_cast<int32_t>(readU32(p)); }
+static int32_t  readI32(const uint8_t* p) { return int32_t(readU32(p)); }
 static int64_t  readI64(const uint8_t* p) {
-    uint64_t lo = readU32(p);
-    uint64_t hi = readU32(p+4);
-    return static_cast<int64_t>(lo | (hi << 32));
+    uint64_t lo = readU32(p), hi = readU32(p+4);
+    return int64_t(lo | (hi << 32));
 }
 
 // ── Sérialisation ─────────────────────────────────────────────────────────────
@@ -43,11 +41,13 @@ bool AppData::serialize(uint8_t buf[SIZE]) const
     writeU32(buf +  4, VERSION);
     writeI32(buf +  8, windowX);
     writeI32(buf + 12, windowY);
-    writeI64(buf + 16, totalSecs);
-    writeI64(buf + 24, launchCount);
-    writeI64(buf + 32, lastLaunch);
-    // [40..59] reserved — déjà à 0
-    writeU32(buf + 60, crc32(buf, 60));
+    writeI32(buf + 16, windowW);
+    writeI32(buf + 20, windowH);
+    writeI64(buf + 24, totalSecs);
+    writeI64(buf + 32, launchCount);
+    writeI64(buf + 40, lastLaunch);
+    // [48..75] reserved
+    writeU32(buf + 76, crc32(buf, 76));
     return true;
 }
 
@@ -57,20 +57,20 @@ AppData AppData::deserialize(const uint8_t buf[SIZE])
     AppData d;
     d.windowX     = readI32(buf +  8);
     d.windowY     = readI32(buf + 12);
-    d.totalSecs   = readI64(buf + 16);
-    d.launchCount = readI64(buf + 24);
-    d.lastLaunch  = readI64(buf + 32);
+    d.windowW     = readI32(buf + 16);
+    d.windowH     = readI32(buf + 20);
+    d.totalSecs   = readI64(buf + 24);
+    d.launchCount = readI64(buf + 32);
+    d.lastLaunch  = readI64(buf + 40);
     return d;
 }
 
-// ── Validation magic + version + CRC ─────────────────────────────────────────
+// ── Validation ────────────────────────────────────────────────────────────────
 bool AppData::validate(const uint8_t buf[SIZE])
 {
     if (readU32(buf +  0) != MAGIC)   return false;
     if (readU32(buf +  4) != VERSION) return false;
-    uint32_t storedCrc   = readU32(buf + 60);
-    uint32_t computedCrc = crc32(buf, 60);
-    return storedCrc == computedCrc;
+    return readU32(buf + 76) == crc32(buf, 76);
 }
 
 // ── Chargement ────────────────────────────────────────────────────────────────
@@ -85,9 +85,7 @@ AppData AppData::load(const QString& path)
             if (validate(buf))
                 return deserialize(buf);
         }
-        // Fichier corrompu ou mauvaise version — on repart de zéro
     }
-    // Retourner une structure par défaut (position non définie, compteurs à 0)
     return AppData{};
 }
 
@@ -99,12 +97,12 @@ bool AppData::save(const QString& path) const
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
-    qint64 written = f.write(reinterpret_cast<const char*>(buf), SIZE);
+    qint64 n = f.write(reinterpret_cast<const char*>(buf), SIZE);
     f.close();
-    return written == SIZE;
+    return n == SIZE;
 }
 
-// ── Formatage du temps cumulé ─────────────────────────────────────────────────
+// ── Formatage ─────────────────────────────────────────────────────────────────
 QString AppData::formattedUsage() const
 {
     int64_t t = totalSecs;
@@ -113,7 +111,7 @@ QString AppData::formattedUsage() const
     int mins  = (t % 3600)  / 60;
     int secs  =  t % 60;
     if (days > 0)
-        return QString("%1j %2h %3m %4s")
+        return QString("%1d %2h %3m %4s")
             .arg(days).arg(hours)
             .arg(mins, 2, 10, QChar('0'))
             .arg(secs, 2, 10, QChar('0'));
