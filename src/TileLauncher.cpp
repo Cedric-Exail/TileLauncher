@@ -194,18 +194,19 @@ void TileButton::mouseReleaseEvent(QMouseEvent* e)
 // ════════════════════════════════════════════════════════════════════════════
 
 QString TileLauncher::iniPath() {
-    // tiles.ini : a cote de l exe (racine)
+    // tiles.ini dans _internal/ (a cote de l exe)
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("tiles.ini");
 }
 QString TileLauncher::logPath() {
-    // TileLauncher.log : a cote de l exe (racine)
+    // TileLauncher.log dans _internal/ (a cote de l exe)
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("TileLauncher.log");
 }
 QString TileLauncher::datPath() {
-    // TileLauncher.dat : dans _internal/
-    QString internal = QDir(QCoreApplication::applicationDirPath())
-                           .absoluteFilePath("_internal");
-    QDir().mkpath(internal); // creer si absent
+    // TileLauncher.dat : dans _internal/ (a cote de l exe)
+    QString appDir   = QCoreApplication::applicationDirPath();
+    QString internal = QDir(appDir).absoluteFilePath("_internal");
+    // Creer _internal/ si absent (premier lancement depuis un autre endroit)
+    QDir().mkpath(internal);
     return QDir(internal).absoluteFilePath("TileLauncher.dat");
 }
 
@@ -236,18 +237,11 @@ QList<TileData> TileLauncher::loadTiles(const QString& path)
 
 QString TileLauncher::loadFont()
 {
-    QString fontsDir = QDir(QCoreApplication::applicationDirPath())
-                           .absoluteFilePath("fonts");
-    QDir dir(fontsDir);
-    if(dir.exists()){
-        for(const auto& f : dir.entryList({"Gilroy*.ttf"},QDir::Files)){
-            int id = QFontDatabase::addApplicationFont(dir.absoluteFilePath(f));
-            if(id>=0){
-                auto fams = QFontDatabase::applicationFontFamilies(id);
-                if(!fams.isEmpty()) return fams.first();
-            }
-        }
-    }
+    // Utiliser la police systeme Windows 11 : Segoe UI Variable
+    // Disponible nativement sur Windows 11, fallback Segoe UI sur Win10
+    QFontDatabase db;
+    if(db.families().contains("Segoe UI Variable"))
+        return "Segoe UI Variable";
     return "Segoe UI";
 }
 
