@@ -219,17 +219,32 @@ void TileButton::mouseReleaseEvent(QMouseEvent* e)
         if (!m_data.command.isEmpty()) {
             Logger::instance().logTileAction(m_data.label, m_data.command);
 
-            // Construire la commande avec séparateurs natifs Windows
+            // Nettoyer le chemin exe
             QString cmd = m_data.command.trimmed();
-            if (cmd.startsWith('"') && cmd.endsWith('"'))
+            // Supprimer guillemets encadrants si presents
+            if (cmd.length() >= 2 && cmd.front() == QChar('"') && cmd.back() == QChar('"'))
                 cmd = cmd.mid(1, cmd.length() - 2);
+            // Resoudre variables environnement Windows (%WINDIR%, etc.)
+            QRegularExpression envRx("%([^%]+)%");
+            auto it = envRx.globalMatch(cmd);
+            while (it.hasNext()) {
+                auto m = it.next();
+                QString val = qEnvironmentVariable(m.captured(1).toUtf8().constData());
+                if (!val.isEmpty()) cmd.replace(m.captured(0), val);
+            }
             cmd = QDir::toNativeSeparators(cmd);
 
-            QStringList args;
+            QStringList argList;
             if (!m_data.args.isEmpty())
-                args = QProcess::splitCommand(m_data.args);
+                argList = QProcess::splitCommand(m_data.args);
 
-            QProcess::startDetached(cmd, args);
+            // startDetached avec workingDir = dossier de l'exe
+            QFileInfo fi(cmd);
+            QString workDir = fi.isFile() ? fi.absolutePath() : QString();
+            bool ok = QProcess::startDetached(cmd, argList, workDir);
+            if (!ok)
+                Logger::instance().log(Logger::WARNING,
+                    QString("Failed to launch: %1").arg(cmd));
         }
     }
 }
@@ -255,24 +270,58 @@ QString TileLauncher::datPath() {
 
 TileLauncher::AppConfig TileLauncher::loadAppConfig(const QString& path)
 {
-    QSettings s(path, QSettings::IniFormat);
     AppConfig cfg;
-    cfg.title = s.value("App/title", "TileLauncher").toString();
+    cfg.title = readIniValue(path, "App", "title", "TileLauncher");
     return cfg;
+}
+
+// Lecture manuelle du .ini pour eviter que QSettings interprete
+// les backslashes Windows comme sequences d'echappement (\W -> W, 	 -> TAB etc.)
+static QString readIniValue(const QString& filePath,
+                             const QString& section,
+                             const QString& key,
+                             const QString& defaultVal = QString())
+{
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return defaultVal;
+
+    bool inSection = false;
+    while (!f.atEnd()) {
+        QString line = QString::fromUtf8(f.readLine()).trimmed();
+        if (line.isEmpty() || line.startsWith(';') || line.startsWith('#'))
+            continue;
+        if (line.startsWith('[')) {
+            QString sec = line.mid(1, line.indexOf(']') - 1).trimmed();
+            inSection = (sec.compare(section, Qt::CaseInsensitive) == 0);
+            continue;
+        }
+        if (inSection) {
+            int eq = line.indexOf('=');
+            if (eq < 0) continue;
+            QString k = line.left(eq).trimmed();
+            if (k.compare(key, Qt::CaseInsensitive) == 0) {
+                // Supprimer commentaire inline apres ;
+                QString v = line.mid(eq + 1);
+                int sc = v.indexOf(" ;");
+                if (sc >= 0) v = v.left(sc);
+                return v.trimmed();
+            }
+        }
+    }
+    return defaultVal;
 }
 
 QList<TileData> TileLauncher::loadTiles(const QString& path)
 {
-    QSettings s(path, QSettings::IniFormat);
     QList<TileData> tiles;
     for (int i = 1; i <= NUM_TILES; ++i) {
-        s.beginGroup(QString("Tile%1").arg(i));
+        QString sec = QString("Tile%1").arg(i);
         TileData t;
-        t.label   = s.value("label",   QString("Tile %1").arg(i)).toString();
-        t.icon    = s.value("icon",    "").toString();
-        t.command = s.value("command", "").toString();
-        t.args    = s.value("args",    "").toString();
-        s.endGroup();
+        t.label   = readIniValue(path, sec, "label",   QString("Tile %1").arg(i));
+        t.icon    = readIniValue(path, sec, "icon",    "");
+        t.command = readIniValue(path, sec, "command", "");
+        t.args    = readIniValue(path, sec, "args",    "");
         tiles.append(t);
     }
     return tiles;
