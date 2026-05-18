@@ -41,7 +41,7 @@ jobs:
         run: |
           pip install aqtinstall --quiet
           aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 `
-            --outputdir C:/Qt --archives qtbase
+            --outputdir C:/Qt --archives qtbase qtnetwork
           $cfg = "C:/Qt/6.8.3/msvc2022_64/lib/cmake/Qt6/Qt6Config.cmake"
           if (-not (Test-Path $cfg)) {
             Write-Error "Qt6Config.cmake introuvable"
