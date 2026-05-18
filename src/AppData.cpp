@@ -15,22 +15,38 @@ uint32_t AppData::crc32(const uint8_t* data, int len)
     return crc ^ 0xFFFFFFFFu;
 }
 
-// ── Helpers little-endian ─────────────────────────────────────────────────────
+// ── Helpers little-endian stricts ─────────────────────────────────────────────
 static void writeU32(uint8_t* p, uint32_t v) {
-    p[0]=uint8_t(v); p[1]=uint8_t(v>>8); p[2]=uint8_t(v>>16); p[3]=uint8_t(v>>24);
+    p[0]=uint8_t(v);      p[1]=uint8_t(v>>8);
+    p[2]=uint8_t(v>>16);  p[3]=uint8_t(v>>24);
 }
-static void writeI32(uint8_t* p, int32_t v)  { writeU32(p, uint32_t(v)); }
-static void writeI64(uint8_t* p, int64_t v)  {
-    writeU32(p,   uint32_t(uint64_t(v)));
-    writeU32(p+4, uint32_t(uint64_t(v) >> 32));
+static void writeI32(uint8_t* p, int32_t v) {
+    writeU32(p, static_cast<uint32_t>(v));
+}
+static void writeI64(uint8_t* p, int64_t v) {
+    writeU32(p,   static_cast<uint32_t>(static_cast<uint64_t>(v) & 0xFFFFFFFF));
+    writeU32(p+4, static_cast<uint32_t>(static_cast<uint64_t>(v) >> 32));
 }
 static uint32_t readU32(const uint8_t* p) {
-    return p[0]|(p[1]<<8)|(p[2]<<16)|(p[3]<<24);
+    return uint32_t(p[0])
+         | uint32_t(p[1]) << 8
+         | uint32_t(p[2]) << 16
+         | uint32_t(p[3]) << 24;
 }
-static int32_t  readI32(const uint8_t* p) { return int32_t(readU32(p)); }
-static int64_t  readI64(const uint8_t* p) {
-    uint64_t lo = readU32(p), hi = readU32(p+4);
-    return int64_t(lo | (hi << 32));
+static int32_t readI32(const uint8_t* p) {
+    // Cast explicite via union pour éviter UB
+    uint32_t u = readU32(p);
+    int32_t  v;
+    std::memcpy(&v, &u, 4);
+    return v;
+}
+static int64_t readI64(const uint8_t* p) {
+    uint64_t lo = readU32(p);
+    uint64_t hi = readU32(p+4);
+    uint64_t u  = lo | (hi << 32);
+    int64_t  v;
+    std::memcpy(&v, &u, 8);
+    return v;
 }
 
 // ── Sérialisation ─────────────────────────────────────────────────────────────
@@ -105,11 +121,11 @@ bool AppData::save(const QString& path) const
 // ── Formatage ─────────────────────────────────────────────────────────────────
 QString AppData::formattedUsage() const
 {
-    int64_t t = totalSecs;
-    int days  =  t / 86400;
-    int hours = (t % 86400) / 3600;
-    int mins  = (t % 3600)  / 60;
-    int secs  =  t % 60;
+    int64_t t = totalSecs < 0 ? 0 : totalSecs;
+    int days  =  static_cast<int>(t / 86400);
+    int hours = static_cast<int>((t % 86400) / 3600);
+    int mins  = static_cast<int>((t % 3600)  / 60);
+    int secs  = static_cast<int>( t % 60);
     if (days > 0)
         return QString("%1d %2h %3m %4s")
             .arg(days).arg(hours)
