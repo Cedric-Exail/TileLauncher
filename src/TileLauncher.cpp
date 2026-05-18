@@ -268,15 +268,6 @@ QString TileLauncher::datPath() {
     return QDir(internal).absoluteFilePath("TileLauncher.dat");
 }
 
-TileLauncher::AppConfig TileLauncher::loadAppConfig(const QString& path)
-{
-    AppConfig cfg;
-    cfg.title = readIniValue(path, "App", "title", "TileLauncher");
-    return cfg;
-}
-
-// Lecture manuelle du .ini pour eviter que QSettings interprete
-// les backslashes Windows comme sequences d'echappement (\W -> W, 	 -> TAB etc.)
 static QString readIniValue(const QString& filePath,
                              const QString& section,
                              const QString& key,
@@ -312,6 +303,15 @@ static QString readIniValue(const QString& filePath,
     return defaultVal;
 }
 
+TileLauncher::AppConfig TileLauncher::loadAppConfig(const QString& path)
+{
+    AppConfig cfg;
+    cfg.title = readIniValue(path, "App", "title", "TileLauncher");
+    return cfg;
+}
+
+// Lecture manuelle du .ini pour eviter que QSettings interprete
+// les backslashes Windows comme sequences d'echappement (\W -> W, 	 -> TAB etc.)
 QList<TileData> TileLauncher::loadTiles(const QString& path)
 {
     QList<TileData> tiles;
