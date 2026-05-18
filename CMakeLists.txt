@@ -8,7 +8,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # ── Qt6 ───────────────────────────────────────────────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 qt_standard_project_setup()
 
 # ── Sources ───────────────────────────────────────────────────────────────────
@@ -36,6 +36,7 @@ target_link_libraries(TileLauncher PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::Network
     # Windows API
     shell32 user32 gdi32 ole32 oleaut32 uuid
     winspool winmm imm32 comdlg32 advapi32
@@ -47,8 +48,16 @@ target_compile_options(TileLauncher PRIVATE
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-O3>
 )
 target_link_options(TileLauncher PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/LTCG /OPT:REF /OPT:ICF>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO>
 )
+
+# Manifest : demander l elevation normale (pas admin) avec priorité normale
+# Le process sera eleve via SetPriorityClass dans main()
+if(WIN32)
+    set_target_properties(TileLauncher PROPERTIES
+        VS_DPI_AWARE "PerMonitor"
+    )
+endif()
 
 # ── Déploiement Qt (DLL dynamiques) ──────────────────────────────────────────
 if(WIN32)
