@@ -1,26 +1,26 @@
 # TileLauncher C++
 
-> Launcher d’applications en 8 tuiles configurable — Windows 11 x64  
+> Launcher d'applications en 8 tuiles configurable — Windows 11 x64  
 > Application native **Qt6 / C++20**, démarrage instantané.
 
 ![Build](../../actions/workflows/build.yml/badge.svg)
 
------
+---
 
 ## Téléchargement
 
 👉 **[Dernière Release](../../releases/latest)** — téléchargez `TileLauncher_Cpp_Win11_x64.zip`
 
------
+---
 
 ## Installation
 
 1. Extraire le ZIP dans le dossier de votre choix
-1. Double-cliquer sur **`TileLauncher.bat`**
+2. Double-cliquer sur **`TileLauncher.bat`**
 
 Aucune installation, aucun prérequis.
 
------
+---
 
 ## Structure du dossier
 
@@ -43,21 +43,21 @@ TileLauncher/
     └── imageformats/
 ```
 
------
+---
 
 ## Interface
 
-|Élément           |Description                                      |
-|------------------|-------------------------------------------------|
-|**8 tuiles**      |Grille 4×2, redimensionnable à la souris         |
-|**Barre de titre**|Couleur céladon `#00FFDA`, déplaçable par glisser|
-|**Bouton ↺**      |Recharge `tiles.ini` sans redémarrer             |
-|**Bouton ✕**      |Ferme l’application                              |
-|**Bords et coins**|Redimensionnement par glisser (curseur adaptatif)|
+| Élément | Description |
+|---------|-------------|
+| **8 tuiles** | Grille 4×2, redimensionnable à la souris |
+| **Barre de titre** | Couleur céladon `#00FFDA`, déplaçable par glisser |
+| **Bouton ↺** | Recharge `tiles.ini` sans redémarrer |
+| **Bouton ✕** | Ferme l'application |
+| **Bords et coins** | Redimensionnement par glisser (curseur adaptatif) |
 
 La fenêtre se place en **arrière-plan** (dernier plan) et **restaure sa position et taille** au prochain lancement.
 
------
+---
 
 ## Configuration — `tiles.ini`
 
@@ -83,10 +83,10 @@ args    = C:\MonProjet
 ### Priorité des icônes
 
 1. Image définie dans `icon=` (si le fichier existe)
-1. Icône native extraite de l’exécutable (`command=`)
-1. Initiale du `label` sur fond noir
+2. Icône native extraite de l'exécutable (`command=`)
+3. Initiale du `label` sur fond noir
 
------
+---
 
 ## Fichiers persistants
 
@@ -94,15 +94,15 @@ args    = C:\MonProjet
 
 Fichier binaire structuré avec magic number et CRC32. Contient :
 
-|Champ            |Description                                  |
-|-----------------|---------------------------------------------|
-|Position X/Y     |Dernière position de la fenêtre sur le bureau|
-|Largeur/Hauteur  |Dernière taille de la fenêtre                |
-|Temps total      |Cumul du temps d’utilisation toutes sessions |
-|Nb lancements    |Compteur permanent de lancements             |
-|Dernier lancement|Timestamp Unix                               |
+| Champ | Description |
+|-------|-------------|
+| Position X/Y | Dernière position de la fenêtre sur le bureau |
+| Largeur/Hauteur | Dernière taille de la fenêtre |
+| Temps total | Cumul du temps d'utilisation toutes sessions |
+| Nb lancements | Compteur permanent de lancements |
+| Dernier lancement | Timestamp Unix |
 
-La position et la taille sont **restaurées au démarrage**, avec vérification que l’écran cible existe toujours (support multi-écrans).
+La position et la taille sont **restaurées au démarrage**, avec vérification que l'écran cible existe toujours (support multi-écrans).
 
 ### `TileLauncher.log` — journal texte
 
@@ -124,17 +124,17 @@ La position et la taille sont **restaurées au démarrage**, avec vérification 
 ╚══════════════════════════════════════════════════════╝
 ```
 
------
+---
 
 ## Performances
 
-|Critère   |Python / PyInstaller|C++ natif Qt6|
-|----------|:------------------:|:-----------:|
-|Taille exe|~40 Mo              |~2 Mo        |
-|Démarrage |~1.8 s              |**< 200 ms** |
-|RAM       |~80 Mo              |~15 Mo       |
+| Critère | Python / PyInstaller | C++ natif Qt6 |
+|---------|:--------------------:|:-------------:|
+| Taille exe | ~40 Mo | ~2 Mo |
+| Démarrage | ~1.8 s | **< 200 ms** |
+| RAM | ~80 Mo | ~15 Mo |
 
------
+---
 
 ## Pipeline CI/CD — GitHub Actions
 
@@ -142,16 +142,16 @@ La position et la taille sont **restaurées au démarrage**, avec vérification 
 build  ──►  test  ──►  release
 ```
 
-|Job      |Détail                                                 |
-|---------|-------------------------------------------------------|
-|`build`  |Qt 6.8.3 + MSVC 2022 sur `windows-2025-vs2026`         |
-|`test`   |Vérifie l’exe, mesure le temps de lancement, screenshot|
-|`release`|Publie le ZIP dans les Releases GitHub                 |
+| Job | Détail |
+|-----|--------|
+| `build` | Qt 6.8.3 + MSVC 2022 sur `windows-2025-vs2026` |
+| `test` | Vérifie l'exe, mesure le temps de lancement, screenshot |
+| `release` | Publie le ZIP dans les Releases GitHub |
 
 Le build se déclenche automatiquement à chaque push sur `main`.  
 Déclenchement manuel possible via **Actions → Run workflow**.
 
------
+---
 
 ## Build local
 
@@ -166,7 +166,7 @@ cmake -B build -G Ninja ^
 cmake --build build --parallel
 ```
 
------
+---
 
 ## Sources
 
