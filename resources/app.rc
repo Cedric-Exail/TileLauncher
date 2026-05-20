@@ -1,1 +1,2 @@
-
+// Windows resource file — icone de l'exe et du .bat
+IDI_ICON1 ICON "icon.ico"
