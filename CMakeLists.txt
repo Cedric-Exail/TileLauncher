@@ -23,12 +23,25 @@ set(HEADERS
     src/Logger.h
     src/AppData.h
 )
+set(RESOURCES resources/app.qrc)
+
+# Icone Windows pour l exe (via .rc)
+if(WIN32)
+    list(APPEND SOURCES resources/app.rc)
+endif()
 
 # ── Exécutable Windows sans console ──────────────────────────────────────────
 if(WIN32)
-    add_executable(TileLauncher WIN32 ${SOURCES} ${HEADERS})
+    add_executable(TileLauncher WIN32 ${SOURCES} ${HEADERS} ${RESOURCES})
 else()
-    add_executable(TileLauncher ${SOURCES} ${HEADERS})
+    add_executable(TileLauncher ${SOURCES} ${HEADERS} ${RESOURCES})
+endif()
+
+# Icone de l exe via CMake
+if(WIN32)
+    set_target_properties(TileLauncher PROPERTIES
+        WIN32_EXECUTABLE TRUE
+    )
 endif()
 
 # ── Liens ─────────────────────────────────────────────────────────────────────
