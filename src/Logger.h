@@ -4,6 +4,8 @@
 #include <QString>
 #include <QFile>
 #include <QElapsedTimer>
+#include <QProcess>
+#include <QMap>
 #include <QPoint>
 #include <QSize>
 
@@ -23,6 +25,8 @@ public:
     void logLaunch();
     void logClose(const QPoint& windowPos, const QSize& windowSize);
     void logTileAction(const QString& label, const QString& command);
+    void logTileClose(const QString& label, const QString& command,
+                      qint64 durationMs);
 
     const AppData& data() const { return m_data; }
     AppData&       data()       { return m_data; }

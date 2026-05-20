@@ -88,17 +88,7 @@ int main(int argc, char* argv[])
             QByteArray data = client->readAll();
             if (data.contains("RAISE")) {
                 // Remettre la fenetre au premier plan
-                window.setWindowState(
-                    window.windowState() & ~Qt::WindowMinimized);
-                window.show();
-                window.raise();
-                window.activateWindow();
-#ifdef Q_OS_WIN
-                // Forcer le focus via WinAPI (Qt seul ne suffit pas toujours)
-                HWND hwnd = reinterpret_cast<HWND>(window.winId());
-                ::SetForegroundWindow(hwnd);
-                ::BringWindowToTop(hwnd);
-#endif
+                window.raiseWindow();
             }
             client->deleteLater();
         });

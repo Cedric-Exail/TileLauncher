@@ -16,7 +16,10 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QSettings>
+#include <QThread>
 #include <QTimer>
+#include <QSystemTrayIcon>
+#include <QMenu>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -221,16 +224,17 @@ void TileButton::mouseReleaseEvent(QMouseEvent* e)
 
             // Nettoyer le chemin exe
             QString cmd = m_data.command.trimmed();
-            // Supprimer guillemets encadrants si presents
             if (cmd.length() >= 2 && cmd.front() == QChar('"') && cmd.back() == QChar('"'))
                 cmd = cmd.mid(1, cmd.length() - 2);
+
             // Resoudre variables environnement Windows (%WINDIR%, etc.)
             QRegularExpression envRx("%([^%]+)%");
             auto it = envRx.globalMatch(cmd);
             while (it.hasNext()) {
-                auto m = it.next();
-                QString val = qEnvironmentVariable(m.captured(1).toUtf8().constData());
-                if (!val.isEmpty()) cmd.replace(m.captured(0), val);
+                auto match = it.next();
+                QString val = qEnvironmentVariable(
+                    match.captured(1).toUtf8().constData());
+                if (!val.isEmpty()) cmd.replace(match.captured(0), val);
             }
             cmd = QDir::toNativeSeparators(cmd);
 
@@ -238,13 +242,29 @@ void TileButton::mouseReleaseEvent(QMouseEvent* e)
             if (!m_data.args.isEmpty())
                 argList = QProcess::splitCommand(m_data.args);
 
-            // startDetached avec workingDir = dossier de l'exe
             QFileInfo fi(cmd);
             QString workDir = fi.isFile() ? fi.absolutePath() : QString();
-            bool ok = QProcess::startDetached(cmd, argList, workDir);
-            if (!ok)
+
+            qint64 pid = 0;
+            bool ok = QProcess::startDetached(cmd, argList, workDir, &pid);
+            if (!ok) {
                 Logger::instance().log(Logger::WARNING,
                     QString("Failed to launch: %1").arg(cmd));
+            } else if (pid > 0) {
+                // Surveiller le processus pour logger sa fermeture
+                QString lbl = m_data.label;
+                QString ccmd = m_data.command;
+                auto* watcher = new ProcessWatcher(pid, lbl, ccmd, qApp);
+                QObject::connect(watcher, &ProcessWatcher::processFinished,
+                    qApp, [](const QString& label,
+                             const QString& command,
+                             qint64 durationMs) {
+                        Logger::instance().logTileClose(label, command, durationMs);
+                    });
+                QObject::connect(watcher, &ProcessWatcher::finished,
+                    watcher, &QObject::deleteLater);
+                watcher->start(QThread::LowPriority);
+            }
         }
     }
 }
@@ -351,24 +371,32 @@ TileLauncher::TileLauncher(QWidget* parent) : QWidget(parent)
 
     setupWindow();
     buildUi();
+    setupTray();
     positionWindow();
 }
 
 void TileLauncher::setupWindow()
 {
-    // Style natif Windows — fenêtre standard avec chrome Windows
-    // Pas de FramelessWindowHint : redimensionnement natif, snap Windows 11, etc.
-    setWindowFlags(Qt::Window | Qt::Tool);
+    // Icone embarquee dans les ressources Qt
+    QIcon appIcon;
+    appIcon.addFile(":/icons/icon_16.png",  QSize(16,16));
+    appIcon.addFile(":/icons/icon_32.png",  QSize(32,32));
+    appIcon.addFile(":/icons/icon_48.png",  QSize(48,48));
+    appIcon.addFile(":/icons/icon_256.png", QSize(256,256));
+    QApplication::setWindowIcon(appIcon);
+
+    // Style natif Windows 11 — barre titre native avec boutons min/max/close
+    setWindowFlags(Qt::Window);
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowTitle(m_appCfg.title);
     setMinimumSize(MIN_W, MIN_H);
 
-    // Restaurer taille sauvegardée ou utiliser 1/4 écran par défaut
+    // Restaurer taille sauvegardée ou utiliser 1/4 ecran par defaut
     const AppData& d = Logger::instance().data();
     QScreen* screen  = QGuiApplication::primaryScreen();
     QRect    geo     = screen->availableGeometry();
-    int w = (d.hasSize()) ? d.windowW : geo.width()  / 2;
-    int h = (d.hasSize()) ? d.windowH : geo.height() / 2;
+    int w = d.hasSize() ? d.windowW : geo.width()  / 2;
+    int h = d.hasSize() ? d.windowH : geo.height() / 2;
     QWidget::resize(w, h);
 }
 
@@ -385,6 +413,36 @@ void TileLauncher::buildUi()
     m_gridLayout->setContentsMargins(0, 0, 0, 0);
     populateGrid(m_tiles);
     root->addWidget(m_gridWidget, 1);
+}
+
+void TileLauncher::setupTray()
+{
+    m_trayIcon = new QSystemTrayIcon(QApplication::windowIcon(), this);
+    m_trayIcon->setToolTip(m_appCfg.title);
+
+    auto* menu = new QMenu(this);
+
+    QAction* restoreAct = menu->addAction("Show / Restore");
+    QObject::connect(restoreAct, &QAction::triggered, this, [this]() {
+        raiseWindow();
+    });
+
+    menu->addSeparator();
+
+    QAction* quitAct = menu->addAction("Quit");
+    QObject::connect(quitAct, &QAction::triggered, this, &TileLauncher::close);
+
+    m_trayIcon->setContextMenu(menu);
+    m_trayIcon->show();
+
+    // Clic simple sur l icone systray -> afficher/masquer
+    QObject::connect(m_trayIcon, &QSystemTrayIcon::activated,
+        this, [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason == QSystemTrayIcon::Trigger ||
+                reason == QSystemTrayIcon::DoubleClick) {
+                raiseWindow();
+            }
+        });
 }
 
 QSize TileLauncher::tileSize() const
@@ -440,6 +498,17 @@ void TileLauncher::positionWindow()
     move(geo.right() - width(), geo.top());
 }
 
+void TileLauncher::raiseWindow()
+{
+    setWindowState(windowState() & ~Qt::WindowMinimized);
+    show();
+    raise();
+    activateWindow();
+#ifdef Q_OS_WIN
+    ::SetForegroundWindow(reinterpret_cast<HWND>(winId()));
+#endif
+}
+
 void TileLauncher::sendToBottom()
 {
 #ifdef Q_OS_WIN
@@ -457,6 +526,7 @@ void TileLauncher::resizeEvent(QResizeEvent* e)
 
 void TileLauncher::closeEvent(QCloseEvent* e)
 {
+    // Sauvegarder position/taille a chaque fermeture/minimisation
     Logger::instance().logClose(pos(), size());
     e->accept();
     QApplication::instance()->quit();

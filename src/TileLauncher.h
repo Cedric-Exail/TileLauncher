@@ -96,8 +96,10 @@ protected:
 
 public slots:
     void sendToBottom();
+    void raiseWindow();
 
 private:
+    void setupTray();
     void    setupWindow();
     void    buildUi();
     void    populateGrid(const QList<TileData>& tiles);
@@ -114,7 +116,52 @@ private:
     AppConfig       m_appCfg;
     QList<TileData> m_tiles;
     QString         m_fontFamily;
-    QLabel*         m_titleLabel = nullptr;
-    QGridLayout*    m_gridLayout = nullptr;
-    QWidget*        m_gridWidget = nullptr;
+    QLabel*             m_titleLabel = nullptr;
+    QGridLayout*        m_gridLayout = nullptr;
+    QWidget*            m_gridWidget = nullptr;
+    QSystemTrayIcon*    m_trayIcon   = nullptr;
+};
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
+// ── Surveillance d'un processus lance par une tuile ──────────────────────────────
+#include <QThread>
+#include <QElapsedTimer>
+#include <QSystemTrayIcon>
+#include <QMenu>
+
+class ProcessWatcher : public QThread {
+    Q_OBJECT
+public:
+    ProcessWatcher(qint64 pid, const QString& label,
+                   const QString& command, QObject* parent = nullptr)
+        : QThread(parent), m_pid(pid), m_label(label), m_command(command) {}
+
+protected:
+    void run() override {
+        m_timer.start();
+#ifdef Q_OS_WIN
+        HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE,
+                                   static_cast<DWORD>(m_pid));
+        if (hProc) {
+            WaitForSingleObject(hProc, INFINITE);
+            CloseHandle(hProc);
+        }
+#endif
+        qint64 ms = m_timer.elapsed();
+        emit processFinished(m_label, m_command, ms);
+    }
+
+signals:
+    void processFinished(const QString& label,
+                         const QString& command,
+                         qint64 durationMs);
+
+private:
+    qint64          m_pid;
+    QString         m_label;
+    QString         m_command;
+    QElapsedTimer   m_timer;
 };

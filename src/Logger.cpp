@@ -118,5 +118,22 @@ void Logger::logClose(const QPoint& windowPos, const QSize& windowSize)
 
 void Logger::logTileAction(const QString& label, const QString& command)
 {
-    log(ACTION, "Tile [" + label + "] -> " + command);
+    log(ACTION, "Tile [" + label + "] launched -> " + command);
+}
+
+void Logger::logTileClose(const QString& label, const QString& command,
+                           qint64 durationMs)
+{
+    qint64 secs = durationMs / 1000;
+    int h  = static_cast<int>(secs / 3600);
+    int m  = static_cast<int>((secs % 3600) / 60);
+    int s  = static_cast<int>(secs % 60);
+    int ms = static_cast<int>(durationMs % 1000);
+    QString dur = QString("%1h %2m %3s %4ms")
+        .arg(h)
+        .arg(m,  2, 10, QChar('0'))
+        .arg(s,  2, 10, QChar('0'))
+        .arg(ms, 3, 10, QChar('0'));
+    log(ACTION, "Tile [" + label + "] closed  -> " + command
+        + " | duration: " + dur);
 }
