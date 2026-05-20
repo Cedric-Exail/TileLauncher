@@ -162,6 +162,9 @@ jobs:
           # Exe dans _internal
           Copy-Item "deploy/TileLauncher.exe" "release/_internal/TileLauncher.exe" -Force
 
+          # Copier icon.ico pour l icone du .bat (lecteur d icone Windows)
+          Copy-Item "resources/icon.ico" "release/_internal/icon.ico" -Force -ErrorAction SilentlyContinue
+
           # Config et .dat dans _internal
           Copy-Item "tiles.ini"        "release/_internal/tiles.ini"               -Force
           Copy-Item "TileLauncher.dat" "release/_internal/TileLauncher.dat"        -Force
@@ -186,6 +189,15 @@ jobs:
           $bat += "set PATH=%~dp0_internal;%PATH%`r`n"
           $bat += "start `"`" `"%~dp0_internal\TileLauncher.exe`"`r`n"
           Set-Content -Path "release/TileLauncher.bat" -Value $bat -Encoding ASCII -NoNewline
+
+          # Appliquer l icone au .bat via PowerShell (lien symbolique de type Shell)
+          $shell  = New-Object -ComObject WScript.Shell
+          $lnk    = $shell.CreateShortcut("release\TileLauncher.lnk")
+          $lnk.TargetPath      = "%~dp0TileLauncher.bat"
+          $lnk.IconLocation    = "%~dp0_internal\icon.ico,0"
+          $lnk.WorkingDirectory = "%~dp0"
+          $lnk.Description     = "TileLauncher"
+          $lnk.Save()
 
           # Lister la structure finale
           Write-Host "=== Structure release ==="
